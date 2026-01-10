@@ -11,6 +11,10 @@ const BASE_CHAIN_PARAMS = {
 };
 
 const apiOrigin = (document.body.dataset.apiOrigin || "").trim();
+const apiBase = apiOrigin || window.location.origin;
+const isStaticHosting =
+  window.location.hostname.endsWith(".web.app") ||
+  window.location.hostname.endsWith(".firebaseapp.com");
 const authStatus = byId("auth-status");
 const walletStatus = byId("wallet-status");
 const chainStatus = byId("chain-status");
@@ -117,13 +121,18 @@ async function handleSignIn() {
 
   try {
     const { token } = await sdk.quickAuth.getToken();
-    const res = await fetch(`${apiOrigin}/api/verify`, {
+    const res = await fetch(`${apiBase}/api/verify`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token }),
     });
 
     if (!res.ok) {
+      if (res.status === 404 || res.status === 405) {
+        throw new Error(
+          "Auth endpoint not found. Deploy the verifier and set data-api-origin."
+        );
+      }
       const errBody = await res.json().catch(() => null);
       const detail = errBody && errBody.error ? errBody.error : `HTTP ${res.status}`;
       throw new Error(`Auth failed: ${detail}`);
@@ -131,16 +140,21 @@ async function handleSignIn() {
 
     const data = await res.json();
     fid = data.fid;
-    setText(authStatus, `Signed in as FID ${fid}`);
+    setText(authStatus, `FID ${fid}`);
     setResult("ok", "Farcaster sign in verified.");
+    return true;
   } catch (err) {
     const msg = errorMessage(err);
     setText(authStatus, "Not signed in");
     if (msg.toLowerCase().includes("fetch")) {
-      setResult("error", "Auth server not reachable. Set data-api-origin in index.html.");
+      setResult(
+        "error",
+        "Auth server not reachable. Set data-api-origin in index.html."
+      );
     } else {
       setResult("error", msg);
     }
+    return false;
   } finally {
     setBusy(authButton, false);
   }
@@ -170,10 +184,16 @@ async function handleConnectWallet() {
 
 async function handleCheckOwnership() {
   setBusy(checkButton, true);
-  setResult("idle", "Checking Degen Dogs ownership...");
+  setResult("idle", "Verifying holder status...");
 
   try {
     const activeProvider = await getProvider();
+    if (!fid) {
+      const signedIn = await handleSignIn();
+      if (!signedIn) {
+        return;
+      }
+    }
     if (!address) {
       await handleConnectWallet();
     }
@@ -206,6 +226,13 @@ async function init() {
   authButton.addEventListener("click", handleSignIn);
   walletButton.addEventListener("click", handleConnectWallet);
   checkButton.addEventListener("click", handleCheckOwnership);
+
+  if (!apiOrigin && isStaticHosting) {
+    setResult(
+      "warn",
+      "Auth server not configured. Set data-api-origin or host the verifier."
+    );
+  }
 
   try {
     await sdk.actions.ready();

@@ -3,17 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Degen Dogs Gate</title>
+    <title>Degen Dogs DAO</title>
     <link rel="preconnect" href="https://auth.farcaster.xyz">
+    <link rel="icon" href="/dog.png">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="/assets/styles.css">
   </head>
   <body data-api-origin="">
     <main class="app">
       <header class="hero">
+        <img class="logo" src="/dog.png" alt="Degen Dogs DAO logo">
         <p class="eyebrow">Farcaster Mini App</p>
-        <h1>Degen Dogs Gate</h1>
-        <p class="lede">Authenticate with Farcaster, connect a wallet, and verify Degen Dogs ownership on Base.</p>
+        <h1>Degen Dogs DAO</h1>
+        <p class="lede">Verify holder status to vote and propose initiatives on Base.</p>
       </header>
 
       <section class="panel">
@@ -39,10 +41,10 @@
         <div class="actions">
           <button id="auth-btn" class="primary">Sign in</button>
           <button id="wallet-btn">Connect wallet</button>
-          <button id="check-btn">Check ownership</button>
+          <button id="check-btn">Verify holder status</button>
         </div>
 
-        <div id="result" class="result" data-state="idle">Waiting for action.</div>
+        <div id="result" class="result" data-state="idle">Ready to verify holder status.</div>
 
         <div class="foot">
           <span>Contract</span>

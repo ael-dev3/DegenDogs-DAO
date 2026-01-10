@@ -1,0 +1,71 @@
+{
+  "accountAssociation": {
+    "header": "REPLACE_WITH_HEADER",
+    "payload": "REPLACE_WITH_PAYLOAD",
+    "signature": "REPLACE_WITH_SIGNATURE"
+  },
+  "miniapp": {
+    "version": "1",
+    "name": "Degen Dogs DAO",
+    "iconUrl": "https://degendogs-dao.web.app/dog.png",
+    "homeUrl": "https://degendogs-dao.web.app",
+    "imageUrl": "https://degendogs-dao.web.app/image.png",
+    "buttonTitle": "Open DAO",
+    "splashImageUrl": "https://degendogs-dao.web.app/splash.png",
+    "splashBackgroundColor": "#0B0D12",
+    "subtitle": "Holder votes and initiatives",
+    "description": "Verify holder status to vote on Degen Dogs DAO proposals and initiatives.",
+    "screenshotUrls": [
+      "https://degendogs-dao.web.app/screenshot-1.png"
+    ],
+    "primaryCategory": "social",
+    "tags": [
+      "degendogs",
+      "dao",
+      "governance",
+      "nft",
+      "holders"
+    ],
+    "heroImageUrl": "https://degendogs-dao.web.app/hero.png",
+    "tagline": "Vote and propose as a holder",
+    "ogTitle": "Degen Dogs DAO",
+    "ogDescription": "Holder gated votes and initiatives on Base.",
+    "ogImageUrl": "https://degendogs-dao.web.app/og-image.png",
+    "requiredChains": [
+      "eip155:8453"
+    ],
+    "canonicalDomain": "degendogs-dao.web.app"
+  },
+  "frame": {
+    "version": "1",
+    "name": "Degen Dogs DAO",
+    "iconUrl": "https://degendogs-dao.web.app/dog.png",
+    "homeUrl": "https://degendogs-dao.web.app",
+    "imageUrl": "https://degendogs-dao.web.app/image.png",
+    "buttonTitle": "Open DAO",
+    "splashImageUrl": "https://degendogs-dao.web.app/splash.png",
+    "splashBackgroundColor": "#0B0D12",
+    "subtitle": "Holder votes and initiatives",
+    "description": "Verify holder status to vote on Degen Dogs DAO proposals and initiatives.",
+    "screenshotUrls": [
+      "https://degendogs-dao.web.app/screenshot-1.png"
+    ],
+    "primaryCategory": "social",
+    "tags": [
+      "degendogs",
+      "dao",
+      "governance",
+      "nft",
+      "holders"
+    ],
+    "heroImageUrl": "https://degendogs-dao.web.app/hero.png",
+    "tagline": "Vote and propose as a holder",
+    "ogTitle": "Degen Dogs DAO",
+    "ogDescription": "Holder gated votes and initiatives on Base.",
+    "ogImageUrl": "https://degendogs-dao.web.app/og-image.png",
+    "requiredChains": [
+      "eip155:8453"
+    ],
+    "canonicalDomain": "degendogs-dao.web.app"
+  }
+}
