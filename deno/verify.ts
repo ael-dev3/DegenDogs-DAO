@@ -1,4 +1,4 @@
-import { createClient, Errors } from "npm:@farcaster/quick-auth@0.0.8";
+import { createClient, Errors } from "https://esm.sh/@farcaster/quick-auth@0.0.8?target=deno";
 
 const client = createClient();
 const appDomain = Deno.env.get("APP_DOMAIN") || "";
