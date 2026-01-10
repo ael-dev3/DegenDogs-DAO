@@ -16,13 +16,12 @@ mainnet to gate DAO voting and initiative submissions to holders.
 - `public/` static Mini App UI (compiled JS + CSS)
 - `src/client/` TypeScript source for the Mini App frontend
 - `src/server/` TypeScript Node server for `/api/verify`
-- `functions/` Firebase Functions verifier for production hosting
 
 ## Stack
 
 - Frontend: HTML + TypeScript (Farcaster Mini App SDK)
 - Backend: Node Quick Auth verifier (optional Neynar enrichment)
-- Hosting: Firebase Hosting for the UI, Deno Deploy or Firebase Functions for `/api/verify`
+- Hosting: Firebase Hosting for the UI, Deno Deploy for `/api/verify`
 
 ## Run locally
 
@@ -45,13 +44,3 @@ Use Deno Deploy to host the `/api/verify` endpoint without Firebase billing.
    - `APP_DOMAIN=degendogs-dao.web.app`
    - `NEYNAR_API_KEY=...` (optional)
 3. Set `data-api-origin` in `public/index.html` to the Deno Deploy URL.
-
-## Firebase Functions verifier
-
-Deploy the verifier so `/api/verify` works from Hosting:
-
-1. `firebase functions:secrets:set NEYNAR_API_KEY`
-2. `firebase deploy --only functions`
-
-Then deploy Hosting with `firebase deploy --only hosting` (or run `firebase deploy`
-to ship both).
