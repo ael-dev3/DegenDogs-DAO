@@ -4,7 +4,7 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "strict": true,
-    "outDir": "public",
+    "outDir": "public/assets",
     "rootDir": "src/client",
     "skipLibCheck": true
   },

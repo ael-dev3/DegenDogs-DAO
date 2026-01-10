@@ -1,13 +1,15 @@
-# Degen Dogs Farcaster Mini App
+# Degen Dogs DAO Farcaster Mini App
 
-This repo hosts a lightweight Farcaster Mini App that authenticates users,
-connects their wallet, and checks Degen Dogs ownership on Base mainnet.
+This repo hosts the Degen Dogs DAO Mini App for Farcaster. It authenticates
+users, connects their wallet, and verifies Degen Dogs ownership on Base
+mainnet to gate DAO voting and initiative submissions to holders.
 
 ## What it does
 
 - Signs in with Farcaster Quick Auth and verifies the JWT on a small Node server.
 - Connects the Farcaster wallet provider and switches to Base if needed.
 - Calls `balanceOf` on the Degen Dogs ERC-721 contract to confirm ownership.
+- Provides the foundation for holder-only votes and initiative proposals.
 
 ## Structure
 
