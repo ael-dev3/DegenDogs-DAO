@@ -47,9 +47,10 @@ Use Deno Deploy to host the `/api/verify` endpoint without Firebase billing.
 
 ## Deno Deploy build settings
 
-- App directory: repository root (`.`)
-- Entrypoint: `deno/verify.ts`
-- Install command: leave empty (preferred). If you must run npm, use `npm install --legacy-peer-deps`.
+- App directory: `deno` (recommended; avoids `package.json` auto-node_modules)
+- Entrypoint: `verify.ts`
+- Install command: leave empty
 - Build command: `true` (or `echo "skip build"`)
+  - If the dependency cache step still complains about `node_modules`, use `deno cache --node-modules-dir=false verify.ts`
 
 If you still see `@farcaster/quick-auth` or `typescript@5.9.3` in build logs, the app is building an older commit. Redeploy the default branch to pick up the latest changes.
