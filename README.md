@@ -40,6 +40,8 @@ auth response with Farcaster profile data and verified addresses.
 Use Deno Deploy to host the `/api/verify` endpoint without Firebase billing.
 
 1. Create a new Deno Deploy project and set the entrypoint to `deno/verify.ts`.
+   If the project runs `npm install`, set the install command to
+   `npm install --legacy-peer-deps` (or disable it).
 2. Add environment variables:
    - `APP_DOMAIN=degendogs-dao.web.app`
    - `NEYNAR_API_KEY=...` (optional)
