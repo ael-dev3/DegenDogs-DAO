@@ -6,7 +6,7 @@ mainnet to gate DAO voting and initiative submissions to holders.
 
 ## What it does
 
-- Signs in with Farcaster Quick Auth and verifies the JWT on a small Node server.
+- Signs in with Farcaster Quick Auth and verifies the JWT via `/api/verify`.
 - Connects the Farcaster wallet provider and switches to Base if needed.
 - Calls `balanceOf` on the Degen Dogs ERC-721 contract to confirm ownership.
 - Provides the foundation for holder-only votes and initiative proposals.
@@ -15,19 +15,19 @@ mainnet to gate DAO voting and initiative submissions to holders.
 
 - `public/` static Mini App UI (compiled JS + CSS)
 - `src/client/` TypeScript source for the Mini App frontend
-- `src/server/` TypeScript Node server for `/api/verify`
+- `deno/` Deno Deploy verifier for `/api/verify`
 
 ## Stack
 
 - Frontend: HTML + TypeScript (Farcaster Mini App SDK)
-- Backend: Node Quick Auth verifier (optional Neynar enrichment)
+- Backend: Deno Deploy Quick Auth verifier (optional Neynar enrichment)
 - Hosting: Firebase Hosting for the UI, Deno Deploy for `/api/verify`
 
 ## Run locally
 
 1. `npm install`
 2. `npm run build`
-3. `APP_DOMAIN=your.domain npm start`
+3. `APP_DOMAIN=your.domain deno run -A deno/verify.ts`
 
 If the API is hosted on a different origin, set `data-api-origin` in
 `public/index.html` to that origin.
