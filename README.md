@@ -18,6 +18,12 @@ mainnet to gate DAO voting and initiative submissions to holders.
 - `src/server/` TypeScript Node server for `/api/verify`
 - `functions/` Firebase Functions verifier for production hosting
 
+## Stack
+
+- Frontend: HTML + TypeScript (Farcaster Mini App SDK)
+- Backend: Node Quick Auth verifier (optional Neynar enrichment)
+- Hosting: Firebase Hosting for the UI, Deno Deploy or Firebase Functions for `/api/verify`
+
 ## Run locally
 
 1. `npm install`
