@@ -10,8 +10,6 @@ const BASE_CHAIN_PARAMS = {
 };
 const apiOrigin = (document.body.dataset.apiOrigin || "").trim();
 const apiBase = apiOrigin || window.location.origin;
-const isStaticHosting = window.location.hostname.endsWith(".web.app") ||
-    window.location.hostname.endsWith(".firebaseapp.com");
 const authStatus = byId("auth-status");
 const walletStatus = byId("wallet-status");
 const chainStatus = byId("chain-status");
@@ -207,9 +205,6 @@ async function connectWalletAndCheck() {
 }
 async function init() {
     authButton.addEventListener("click", handleSignIn);
-    if (!apiOrigin && isStaticHosting) {
-        setResult("warn", "Auth server not configured. Set data-api-origin or host the verifier.");
-    }
     try {
         await sdk.actions.ready();
     }

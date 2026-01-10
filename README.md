@@ -16,6 +16,7 @@ mainnet to gate DAO voting and initiative submissions to holders.
 - `public/` static Mini App UI (compiled JS + CSS)
 - `src/client/` TypeScript source for the Mini App frontend
 - `src/server/` TypeScript Node server for `/api/verify`
+- `functions/` Firebase Functions verifier for production hosting
 
 ## Run locally
 
@@ -28,3 +29,13 @@ If the API is hosted on a different origin, set `data-api-origin` in
 
 Optional: set `NEYNAR_API_KEY` (and `NEYNAR_API_BASE` if needed) to enrich the
 auth response with Farcaster profile data and verified addresses.
+
+## Firebase Functions verifier
+
+Deploy the verifier so `/api/verify` works from Hosting:
+
+1. `firebase functions:secrets:set NEYNAR_API_KEY`
+2. `firebase deploy --only functions`
+
+Then deploy Hosting with `firebase deploy --only hosting` (or run `firebase deploy`
+to ship both).
