@@ -160,47 +160,56 @@ async function handleSignIn() {
     } else {
       setResult("error", msg);
     }
-    return false;
   }
 
-  try {
-    await connectWalletAndCheck();
-  } catch (err) {
-    setResult("error", errorMessage(err));
-  } finally {
-    setBusy(authButton, false);
+  if (signedIn) {
+    try {
+      await connectWalletAndCheck();
+    } catch (err) {
+      setResult("error", errorMessage(err));
+    }
   }
 
+  setBusy(authButton, false);
   return signedIn;
 }
 
 async function connectWalletAndCheck() {
   setResult("idle", "Connecting Farcaster wallet...");
+  setText(walletStatus, "Connecting...");
+  setText(dogsStatus, "Checking...");
 
-  const activeProvider = await getProvider();
-  await ensureBaseChain(activeProvider);
+  try {
+    const activeProvider = await getProvider();
+    await ensureBaseChain(activeProvider);
 
-  const accounts = (await activeProvider.request({ method: "eth_requestAccounts" })) as string[];
-  if (!accounts || !accounts.length) {
-    throw new Error("No account returned");
-  }
+    const accounts = (await activeProvider.request({ method: "eth_requestAccounts" })) as string[];
+    if (!accounts || !accounts.length) {
+      throw new Error("No account returned");
+    }
 
-  address = accounts[0];
-  setText(walletStatus, formatAddress(address));
+    address = accounts[0];
+    setText(walletStatus, formatAddress(address));
 
-  setResult("idle", "Checking Degen Dogs ownership...");
-  const data = encodeBalanceOf(address);
-  const result = (await activeProvider.request({
-    method: "eth_call",
-    params: [{ to: CONTRACT, data }, "latest"],
-  })) as string;
+    setResult("idle", "Checking Degen Dogs ownership...");
+    const data = encodeBalanceOf(address);
+    const result = (await activeProvider.request({
+      method: "eth_call",
+      params: [{ to: CONTRACT, data }, "latest"],
+    })) as string;
 
-  const balance = parseHexToBigInt(result);
-  setText(dogsStatus, balance.toString());
-  if (balance > 0n) {
-    setResult("ok", `Holder verified with ${balance} Degen Dogs.`);
-  } else {
-    setResult("warn", "No Degen Dogs found for this wallet.");
+    const balance = parseHexToBigInt(result);
+    setText(dogsStatus, balance.toString());
+    if (balance > 0n) {
+      setResult("ok", `Holder verified with ${balance} Degen Dogs.`);
+    } else {
+      setResult("warn", "No Degen Dogs found for this wallet.");
+    }
+  } catch (err) {
+    setText(walletStatus, "Not connected");
+    setText(chainStatus, "Unknown");
+    setText(dogsStatus, "Unchecked");
+    throw err;
   }
 }
 
