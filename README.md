@@ -25,3 +25,6 @@ mainnet to gate DAO voting and initiative submissions to holders.
 
 If the API is hosted on a different origin, set `data-api-origin` in
 `public/index.html` to that origin.
+
+Optional: set `NEYNAR_API_KEY` (and `NEYNAR_API_BASE` if needed) to enrich the
+auth response with Farcaster profile data and verified addresses.

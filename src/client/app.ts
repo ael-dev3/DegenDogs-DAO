@@ -4,6 +4,14 @@ type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 };
 
+type VerifyResponse = {
+  fid: number;
+  username?: string;
+  displayName?: string;
+  custodyAddress?: string;
+  verifiedEthAddresses?: string[];
+};
+
 const CONTRACT = "0x09154248fFDbaF8aA877aE8A4bf8cE1503596428";
 const BASE_CHAIN_ID = "0x2105";
 const BASE_CHAIN_PARAMS = {
@@ -25,10 +33,13 @@ const chainStatus = byId("chain-status");
 const dogsStatus = byId("dogs-status");
 const resultBox = byId("result");
 const authButton = byId("auth-btn") as HTMLButtonElement;
+const authButtonLabel = authButton.textContent?.trim() || "Sign in & verify";
 
 let provider: EthereumProvider | null = null;
 let address: string | null = null;
 let fid: number | null = null;
+let verifiedAddresses: string[] = [];
+let hasSignedIn = false;
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -49,6 +60,11 @@ function setResult(state: string, text: string) {
 
 function setBusy(button: HTMLButtonElement, isBusy: boolean) {
   button.disabled = isBusy;
+  button.setAttribute("aria-busy", isBusy ? "true" : "false");
+}
+
+function setButtonLabel(text: string) {
+  authButton.textContent = text;
 }
 
 function formatAddress(value: string | null) {
@@ -120,18 +136,14 @@ async function ensureBaseChain(activeProvider: EthereumProvider) {
 
 async function handleSignIn() {
   setBusy(authButton, true);
+  setButtonLabel("Signing in...");
   setResult("idle", "Requesting Farcaster sign in...");
   setText(authStatus, "Signing in...");
 
   let signedIn = false;
   try {
     // Quick Auth triggers Farcaster sign-in if needed.
-    const { token } = await sdk.quickAuth.getToken();
-    const res = await fetch(`${apiBase}/api/verify`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
+    const res = await sdk.quickAuth.fetch(`${apiBase}/api/verify`);
 
     if (!res.ok) {
       if (res.status === 404 || res.status === 405) {
@@ -144,10 +156,24 @@ async function handleSignIn() {
       throw new Error(`Auth failed: ${detail}`);
     }
 
-    const data = (await res.json()) as { fid: number };
+    const data = (await res.json()) as VerifyResponse;
     fid = data.fid;
-    setText(authStatus, `FID ${fid}`);
-    setResult("ok", "Farcaster sign in verified.");
+    verifiedAddresses = Array.isArray(data.verifiedEthAddresses)
+      ? data.verifiedEthAddresses
+      : [];
+    if (data.custodyAddress) {
+      verifiedAddresses = Array.from(
+        new Set([...verifiedAddresses, data.custodyAddress]),
+      );
+    }
+    const handle = data.username ? `@${data.username}` : "";
+    setText(authStatus, handle ? `${handle} (FID ${fid})` : `FID ${fid}`);
+    setResult(
+      "ok",
+      data.displayName
+        ? `${data.displayName} signed in.`
+        : "Farcaster sign in verified.",
+    );
     signedIn = true;
   } catch (err) {
     const msg = errorMessage(err);
@@ -162,6 +188,7 @@ async function handleSignIn() {
     }
   }
 
+  hasSignedIn = signedIn;
   if (signedIn) {
     try {
       await connectWalletAndCheck();
@@ -171,10 +198,12 @@ async function handleSignIn() {
   }
 
   setBusy(authButton, false);
+  setButtonLabel(hasSignedIn ? "Recheck holder" : authButtonLabel);
   return signedIn;
 }
 
 async function connectWalletAndCheck() {
+  setButtonLabel("Connecting wallet...");
   setResult("idle", "Connecting Farcaster wallet...");
   setText(walletStatus, "Connecting...");
   setText(dogsStatus, "Checking...");
@@ -191,6 +220,7 @@ async function connectWalletAndCheck() {
     address = accounts[0];
     setText(walletStatus, formatAddress(address));
 
+    setButtonLabel("Checking holdings...");
     setResult("idle", "Checking Degen Dogs ownership...");
     const data = encodeBalanceOf(address);
     const result = (await activeProvider.request({
@@ -200,10 +230,21 @@ async function connectWalletAndCheck() {
 
     const balance = parseHexToBigInt(result);
     setText(dogsStatus, balance.toString());
+    const normalizedAddress = address.toLowerCase();
+    const hasVerifiedMatch = verifiedAddresses.some(
+      (addr) => addr.toLowerCase() === normalizedAddress,
+    );
+    const verificationNote =
+      verifiedAddresses.length && !hasVerifiedMatch
+        ? " Wallet not linked to your Farcaster profile."
+        : "";
     if (balance > 0n) {
-      setResult("ok", `Holder verified with ${balance} Degen Dogs.`);
+      setResult(
+        "ok",
+        `Holder verified with ${balance} Degen Dogs.${verificationNote}`,
+      );
     } else {
-      setResult("warn", "No Degen Dogs found for this wallet.");
+      setResult("warn", `No Degen Dogs found for this wallet.${verificationNote}`);
     }
   } catch (err) {
     setText(walletStatus, "Not connected");
