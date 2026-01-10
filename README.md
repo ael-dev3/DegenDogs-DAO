@@ -30,6 +30,16 @@ If the API is hosted on a different origin, set `data-api-origin` in
 Optional: set `NEYNAR_API_KEY` (and `NEYNAR_API_BASE` if needed) to enrich the
 auth response with Farcaster profile data and verified addresses.
 
+## Deno Deploy verifier
+
+Use Deno Deploy to host the `/api/verify` endpoint without Firebase billing.
+
+1. Create a new Deno Deploy project and set the entrypoint to `deno/verify.ts`.
+2. Add environment variables:
+   - `APP_DOMAIN=degendogs-dao.web.app`
+   - `NEYNAR_API_KEY=...` (optional)
+3. Set `data-api-origin` in `public/index.html` to the Deno Deploy URL.
+
 ## Firebase Functions verifier
 
 Deploy the verifier so `/api/verify` works from Hosting:
