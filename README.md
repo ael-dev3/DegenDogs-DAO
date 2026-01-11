@@ -23,15 +23,14 @@ mainnet to gate DAO voting and initiative submissions to holders.
 - Backend: Deno Deploy Quick Auth verifier (optional Neynar enrichment)
 - Hosting: Firebase Hosting for the UI, Deno Deploy for `/api/verify`
 
-## Run locally
+## Build + deploy (no local hosting)
 
 1. `npm install`
 2. `npm run build`
-3. `APP_DOMAIN=your.domain deno run -A deno/verify.ts`
-   - Use a comma-separated list to allow multiple domains, e.g. `APP_DOMAIN=degendogs-dao.web.app,degendogs-dao.firebaseapp.com`.
+3. `firebase deploy --only hosting`
 
-If the API is hosted on a different origin, set `data-api-origin` in
-`public/index.html` to that origin.
+The app is hosted on Firebase Hosting, and the `/api/verify` endpoint is hosted
+on Deno Deploy. No local hosting is required.
 
 Optional: set `NEYNAR_API_KEY` (and `NEYNAR_API_BASE` if needed) to enrich the  
 auth response with Farcaster profile data and verified addresses.
