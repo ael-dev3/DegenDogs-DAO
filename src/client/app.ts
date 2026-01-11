@@ -65,6 +65,8 @@ let fid: number | null = null;
 let verifiedAddresses: string[] = [];
 let hasSignedIn = false;
 let sdkReady = false;
+let isMiniApp = false;
+let supportsWallet = false;
 let profileHoldings: { total: bigint; checked: number; failed: number } | null =
   null;
 
@@ -730,18 +732,18 @@ async function handleSignIn() {
       setResult("error", errorMessage(err));
     }
     let autoChecked = false;
-    if (sdkReady) {
+    if (sdkReady && supportsWallet) {
       setButtonLabel(walletButton, "Connecting wallet...");
       autoChecked = await connectWalletAndCheck({
-        allowPrompt: true,
+        allowPrompt: false,
         silent: true,
       });
     }
     setBusy(walletButton, false);
-    walletButton.disabled = false;
+    walletButton.disabled = !supportsWallet;
     setButtonLabel(
       walletButton,
-      autoChecked ? "Recheck wallet" : walletButtonLabel,
+      autoChecked ? "Recheck wallet" : supportsWallet ? walletButtonLabel : "Wallet unavailable",
     );
   } catch (err) {
     const msg = errorMessage(err);
@@ -771,6 +773,10 @@ async function handleWalletCheck() {
     setResult("warn", "Sign in first to verify your profile.");
     return false;
   }
+  if (!supportsWallet) {
+    setResult("warn", "Wallet access is not available in this host.");
+    return false;
+  }
 
   setBusy(walletButton, true);
   setButtonLabel(walletButton, "Checking wallet...");
@@ -782,17 +788,39 @@ async function handleWalletCheck() {
 
 async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
   const { allowPrompt = true, silent = false } = options;
+  const snapshot = silent
+    ? {
+        wallet: walletStatus.textContent || "",
+        chain: chainStatus.textContent || "",
+        dogs: dogsStatus.textContent || "",
+        result: resultBox.textContent || "",
+        state: resultBox.dataset.state || "idle",
+      }
+    : null;
+  const restoreSnapshot = () => {
+    if (!snapshot) {
+      return;
+    }
+    setText(walletStatus, snapshot.wallet);
+    setText(chainStatus, snapshot.chain);
+    setText(dogsStatus, snapshot.dogs);
+    setResult(snapshot.state, snapshot.result);
+  };
   if (!silent) {
     setResult("idle", "Connecting Farcaster wallet...");
+    setText(walletStatus, "Connecting...");
+    setText(dogsStatus, "Checking...");
   }
-  setText(walletStatus, "Connecting...");
-  setText(dogsStatus, "Checking...");
 
   let activeProvider: EthereumProvider;
   try {
     activeProvider = await getProvider();
   } catch (err) {
     logError("Wallet provider", err);
+    if (silent) {
+      restoreSnapshot();
+      return false;
+    }
     setText(walletStatus, "Not connected");
     setText(chainStatus, "Unknown");
     setText(dogsStatus, "Unchecked");
@@ -807,13 +835,13 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
 
   try {
     logDebug("Wallet: provider ready");
-    const { chainId } = await ensureBaseChain(activeProvider, false);
-
     const accounts = await requestAccounts(activeProvider, allowPrompt);
     if (!accounts?.length) {
-      setText(walletStatus, "Not connected");
-      setText(dogsStatus, "Unchecked");
-      if (!silent) {
+      if (silent) {
+        restoreSnapshot();
+      } else {
+        setText(walletStatus, "Not connected");
+        setText(dogsStatus, "Unchecked");
         setResult(
           "warn",
           "Wallet not connected. Tap Connect wallet to retry.",
@@ -821,6 +849,8 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
       }
       return false;
     }
+
+    const { chainId } = await ensureBaseChain(activeProvider, false);
 
     address = accounts[0];
     setText(walletStatus, formatAddress(address));
@@ -875,6 +905,10 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
     }
     return true;
   } catch (err) {
+    if (silent) {
+      restoreSnapshot();
+      return false;
+    }
     setText(walletStatus, "Not connected");
     setText(chainStatus, "Unknown");
     setText(dogsStatus, "Unchecked");
@@ -915,9 +949,34 @@ async function init() {
   }
 
   try {
+    isMiniApp = await sdk.isInMiniApp();
+  } catch (err) {
+    logError("SDK isInMiniApp", err);
+  }
+
+  if (!isMiniApp) {
+    sdkReady = false;
+    supportsWallet = false;
+    setResult("warn", "Not running inside a Farcaster host.");
+    return;
+  }
+
+  try {
     await sdk.actions.ready();
     sdkReady = true;
     logDebug("SDK ready");
+    try {
+      const capabilities = await sdk.getCapabilities();
+      supportsWallet = capabilities.includes("wallet.getEthereumProvider");
+      logDebug("SDK capabilities", {
+        supportsWallet,
+        count: capabilities.length,
+      });
+    } catch (err) {
+      logError("SDK capabilities", err);
+      supportsWallet = false;
+    }
+
     if (debugEnabled) {
       try {
         const context = await sdk.context;
@@ -928,6 +987,7 @@ async function init() {
     }
   } catch (err) {
     sdkReady = false;
+    supportsWallet = false;
     logError("SDK ready", err);
     setResult("warn", "Not running inside a Farcaster host.");
   }
