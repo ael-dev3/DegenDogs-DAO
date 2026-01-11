@@ -28,6 +28,7 @@ mainnet to gate DAO voting and initiative submissions to holders.
 1. `npm install`
 2. `npm run build`
 3. `APP_DOMAIN=your.domain deno run -A deno/verify.ts`
+   - Use a comma-separated list to allow multiple domains, e.g. `APP_DOMAIN=degendogs-dao.web.app,degendogs-dao.firebaseapp.com`.
 
 If the API is hosted on a different origin, set `data-api-origin` in
 `public/index.html` to that origin.
@@ -41,7 +42,7 @@ Use Deno Deploy to host the `/api/verify` endpoint without Firebase billing.
 
 1. Create a new Deno Deploy project and set the entrypoint to `deno/verify.ts`.
 2. Add environment variables:
-   - `APP_DOMAIN=degendogs-dao.web.app`
+   - `APP_DOMAIN=degendogs-dao.web.app` (comma-separated list to allow `firebaseapp.com` too)
    - `NEYNAR_API_KEY=...` (optional)
 3. Set `data-api-origin` in `public/index.html` to the Deno Deploy URL.
 
