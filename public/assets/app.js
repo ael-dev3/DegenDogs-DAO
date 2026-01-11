@@ -12,12 +12,14 @@ const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled = urlParams.has("debug") || window.localStorage.getItem("debug") === "1";
 const appVersion = (document.body.dataset.appVersion || "").trim() || "unknown";
 const apiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
-const apiOrigin = (apiOriginOverride || document.body.dataset.apiOrigin || "")
-    .trim();
-const fallbackApiBase = resolveApiBase("https://degendogs-dao.ael-dev3.deno.net");
-const apiBase = resolveApiBase(apiOrigin || window.location.origin);
+const htmlApiOrigin = (document.body.dataset.apiOrigin || "").trim();
+const apiOrigin = (apiOriginOverride || htmlApiOrigin).trim();
+const defaultApiBase = resolveApiBase("https://degendogs-dao.ael-dev3.deno.net");
+const isFirebaseHost = window.location.origin.includes("web.app") ||
+    window.location.origin.includes("firebaseapp.com");
+const apiBase = resolveApiBase(apiOrigin || (isFirebaseHost ? defaultApiBase : window.location.origin));
 const apiVerifyUrl = `${apiBase}/api/verify`;
-const fallbackVerifyUrl = `${fallbackApiBase}/api/verify`;
+const fallbackVerifyUrl = `${defaultApiBase}/api/verify`;
 const authStatus = byId("auth-status");
 const walletStatus = byId("wallet-status");
 const chainStatus = byId("chain-status");
@@ -116,19 +118,15 @@ function apiConfigLines(activeUrl) {
         `data-api-origin: ${apiOrigin || "(empty)"}`,
         `window.origin: ${window.location.origin}`,
         `fallback: ${fallbackVerifyUrl}`,
+        `firebaseHost: ${isFirebaseHost ? "yes" : "no"}`,
         `version: ${appVersion}`,
     ];
 }
 function authEndpointErrorMessage(status, bodyText, activeUrl) {
     const lines = [`Auth endpoint not found (HTTP ${status}).`, `URL: ${activeUrl}`];
-    if (debugEnabled) {
-        lines.push(...apiConfigLines(activeUrl));
-        if (bodyText) {
-            lines.push(`body: ${truncate(bodyText, 260)}`);
-        }
-    }
-    else {
-        lines.push("Add ?debug=1 for details.");
+    lines.push(...apiConfigLines(activeUrl));
+    if (bodyText) {
+        lines.push(`body: ${truncate(bodyText, 260)}`);
     }
     return lines.join("\n");
 }
@@ -393,6 +391,7 @@ async function init() {
         logDebug("App version", appVersion);
         logDebug("Location", window.location.href);
         logDebug("API base", apiBase);
+        logDebug("Firebase host", isFirebaseHost);
         if (apiOriginOverride) {
             logDebug("API override", apiOriginOverride);
         }
