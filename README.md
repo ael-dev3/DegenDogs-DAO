@@ -50,6 +50,9 @@ config to `public/index.html`:
 Enable Anonymous Authentication in Firebase (Authentication -> Sign-in method),
 because posts/votes require an authenticated Firebase user.
 
+If the app is hosted on Firebase Hosting, it will also try to load config from
+`/__/firebase/init.json`, so you can leave the data attributes empty.
+
 To apply the Firestore rules in `firestore.rules`, run:
 
 `firebase deploy --only firestore`

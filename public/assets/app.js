@@ -63,6 +63,7 @@ let walletHoldings = null;
 let isHolder = false;
 let firestoreDb = null;
 let firestoreReady = false;
+let firestoreInitInProgress = false;
 let firebaseAuth = null;
 let firebaseUser = null;
 let firebaseAuthReady = false;
@@ -222,18 +223,15 @@ function profileSummaryForWalletResult(summary) {
     }
     return `No Degen Dogs found across ${summary.checked} verified ${walletLabel}.${failureNote}`;
 }
-function getFirebaseConfig() {
-    const globalConfig = window.FIREBASE_CONFIG;
-    if (globalConfig && typeof globalConfig === "object") {
-        return globalConfig;
-    }
-    const dataset = document.body.dataset;
-    const apiKey = (dataset.firebaseApiKey || "").trim();
-    const authDomain = (dataset.firebaseAuthDomain || "").trim();
-    const projectId = (dataset.firebaseProjectId || "").trim();
-    const appId = (dataset.firebaseAppId || "").trim();
-    const messagingSenderId = (dataset.firebaseMessagingSenderId || "").trim();
-    const storageBucket = (dataset.firebaseStorageBucket || "").trim();
+function normalizeFirebaseConfig(raw) {
+    const apiKey = typeof raw.apiKey === "string" ? raw.apiKey.trim() : "";
+    const authDomain = typeof raw.authDomain === "string" ? raw.authDomain.trim() : "";
+    const projectId = typeof raw.projectId === "string" ? raw.projectId.trim() : "";
+    const appId = typeof raw.appId === "string" ? raw.appId.trim() : "";
+    const messagingSenderId = typeof raw.messagingSenderId === "string"
+        ? raw.messagingSenderId.trim()
+        : "";
+    const storageBucket = typeof raw.storageBucket === "string" ? raw.storageBucket.trim() : "";
     if (!apiKey || !authDomain || !projectId || !appId) {
         return null;
     }
@@ -245,6 +243,43 @@ function getFirebaseConfig() {
         messagingSenderId: messagingSenderId || undefined,
         storageBucket: storageBucket || undefined,
     };
+}
+function getFirebaseConfig() {
+    const globalConfig = window.FIREBASE_CONFIG;
+    if (globalConfig && typeof globalConfig === "object") {
+        const normalized = normalizeFirebaseConfig(globalConfig);
+        if (normalized) {
+            return normalized;
+        }
+    }
+    const dataset = document.body.dataset;
+    const raw = {
+        apiKey: dataset.firebaseApiKey,
+        authDomain: dataset.firebaseAuthDomain,
+        projectId: dataset.firebaseProjectId,
+        appId: dataset.firebaseAppId,
+        messagingSenderId: dataset.firebaseMessagingSenderId,
+        storageBucket: dataset.firebaseStorageBucket,
+    };
+    return normalizeFirebaseConfig(raw);
+}
+async function loadFirebaseConfig() {
+    const config = getFirebaseConfig();
+    if (config) {
+        return config;
+    }
+    try {
+        const res = await fetch("/__/firebase/init.json");
+        if (!res.ok) {
+            return null;
+        }
+        const json = (await res.json());
+        return normalizeFirebaseConfig(json);
+    }
+    catch (err) {
+        logDebug("Firebase init.json unavailable", errorMessage(err));
+        return null;
+    }
 }
 function setPostsStatus(state, text) {
     postsStatus.dataset.state = state;
@@ -263,7 +298,11 @@ function updatePostFormState() {
     postBody.disabled = !firestoreReady;
     refreshPostsButton.disabled = !firestoreReady;
     if (!firestoreReady) {
-        setPostsStatus("warn", "Firestore is not configured yet.");
+        const status = firestoreInitInProgress ? "idle" : "warn";
+        const message = firestoreInitInProgress
+            ? "Connecting to Firebase..."
+            : "Firestore is not configured yet.";
+        setPostsStatus(status, message);
         postsPanel.dataset.state = "disabled";
         return;
     }
@@ -480,12 +519,15 @@ async function voteOnPost(postId, button, countEl) {
         button.disabled = false;
     }
 }
-function initFirestore() {
-    if (firestoreDb) {
+async function initFirestore() {
+    if (firestoreDb || firestoreInitInProgress) {
         return firestoreDb;
     }
-    const config = getFirebaseConfig();
+    firestoreInitInProgress = true;
+    updatePostFormState();
+    const config = await loadFirebaseConfig();
     if (!config) {
+        firestoreInitInProgress = false;
         setPostsStatus("warn", "Firestore is not configured yet. Add Firebase config values.");
         postsPanel.dataset.state = "disabled";
         return null;
@@ -494,11 +536,13 @@ function initFirestore() {
         const app = initializeApp(config);
         firestoreDb = getFirestore(app);
         firestoreReady = true;
+        firestoreInitInProgress = false;
         updatePostFormState();
         void initFirebaseAuth(app);
         return firestoreDb;
     }
     catch (err) {
+        firestoreInitInProgress = false;
         logError("Firestore init", err);
         setPostsStatus("error", "Firestore failed to initialize.");
         return null;
@@ -1199,8 +1243,9 @@ async function init() {
             setResult("warn", "Not running inside a Farcaster host.");
         }
     }
-    initFirestore();
+    void initFirestore().then(() => {
+        void loadPosts();
+    });
     updatePostFormState();
-    void loadPosts();
 }
 init();
