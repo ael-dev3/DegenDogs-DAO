@@ -482,6 +482,21 @@ function formatPostDate(value: unknown) {
   return "Just now";
 }
 
+function optionalProfileFields(
+  profile: { username?: string; displayName?: string } | null,
+) {
+  const data: { username?: string; displayName?: string } = {};
+  const username = (profile?.username || "").trim();
+  if (username) {
+    data.username = username;
+  }
+  const displayName = (profile?.displayName || "").trim();
+  if (displayName) {
+    data.displayName = displayName;
+  }
+  return data;
+}
+
 function renderPosts(posts: Array<Record<string, unknown>>) {
   postsList.innerHTML = "";
   if (!posts.length) {
@@ -739,13 +754,13 @@ async function createThreadReply(
     const threadsRef = collection(firestoreDb, "posts", postId, "threads");
     const threadDoc = doc(threadsRef);
     const postRef = doc(firestoreDb, "posts", postId);
+    const profileFields = optionalProfileFields(userProfile);
     await runTransaction(firestoreDb, async (tx: any) => {
       tx.set(threadDoc, {
         body,
         fid,
         uid,
-        username: userProfile?.username || undefined,
-        displayName: userProfile?.displayName || undefined,
+        ...profileFields,
         createdAt: serverTimestamp(),
       });
       tx.update(postRef, {
@@ -828,12 +843,12 @@ async function createPost() {
   setPostsStatus("idle", "Posting...");
   try {
     const postsRef = collection(firestoreDb, "posts");
+    const profileFields = optionalProfileFields(userProfile);
     await addDoc(postsRef, {
       title,
       body,
       fid,
-      username: userProfile?.username || undefined,
-      displayName: userProfile?.displayName || undefined,
+      ...profileFields,
       uid,
       createdAt: serverTimestamp(),
       voteCount: 0,
