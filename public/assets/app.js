@@ -8,6 +8,7 @@ const BASE_CHAIN_PARAMS = {
     rpcUrls: ["https://base.publicnode.com"],
     blockExplorerUrls: ["https://basescan.org"],
 };
+const BASE_RPC_URL = BASE_CHAIN_PARAMS.rpcUrls[0] || "";
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled = urlParams.has("debug") || window.localStorage.getItem("debug") === "1";
 const appVersion = (document.body.dataset.appVersion || "").trim() || "unknown";
@@ -160,6 +161,72 @@ function errorMessage(err) {
         return String(err);
     }
 }
+function isMethodUnsupported(err) {
+    const message = errorMessage(err).toLowerCase();
+    const code = err && typeof err === "object"
+        ? err.code
+        : undefined;
+    return (message.includes("not support") ||
+        message.includes("unsupported") ||
+        code === -32601 ||
+        code === "METHOD_NOT_FOUND" ||
+        code === 4200 ||
+        code === "4200");
+}
+async function requestAccounts(activeProvider) {
+    try {
+        const accounts = (await activeProvider.request({
+            method: "eth_requestAccounts",
+        }));
+        if (accounts?.length) {
+            return accounts;
+        }
+    }
+    catch (err) {
+        if (!isMethodUnsupported(err)) {
+            throw err;
+        }
+        logDebug("Wallet: eth_requestAccounts unsupported", errorMessage(err));
+    }
+    try {
+        const accounts = (await activeProvider.request({
+            method: "eth_accounts",
+        }));
+        if (accounts?.length) {
+            return accounts;
+        }
+    }
+    catch (err) {
+        if (!isMethodUnsupported(err)) {
+            throw err;
+        }
+        logDebug("Wallet: eth_accounts unsupported", errorMessage(err));
+    }
+    throw new Error("Wallet provider does not expose accounts. Open the mini app in a Farcaster client with a connected wallet.");
+}
+async function rpcCallBase(method, params) {
+    if (!BASE_RPC_URL) {
+        throw new Error("Base RPC URL is not configured.");
+    }
+    const res = await fetch(BASE_RPC_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: Date.now(),
+            method,
+            params,
+        }),
+    });
+    if (!res.ok) {
+        throw new Error(`Base RPC HTTP ${res.status}`);
+    }
+    const json = (await res.json());
+    if (json.error) {
+        throw new Error(json.error.message || "Base RPC error");
+    }
+    return json.result ?? "";
+}
 function formatErrorDetail(value) {
     const base = value.error || "error";
     const extras = Object.entries(value)
@@ -182,33 +249,59 @@ async function getProvider() {
     return provider;
 }
 async function ensureBaseChain(activeProvider) {
-    setText(chainStatus, "Switching...");
-    let chainId = (await activeProvider.request({ method: "eth_chainId" }));
-    logDebug("Wallet chainId", chainId);
+    setText(chainStatus, "Checking...");
+    let chainId = null;
+    try {
+        chainId = (await activeProvider.request({ method: "eth_chainId" }));
+        logDebug("Wallet chainId", chainId);
+    }
+    catch (err) {
+        logError("wallet_chainId", err);
+        setText(chainStatus, "Unknown (rpc)");
+        return { chainId: null, useRpcFallback: true };
+    }
     if (chainId !== BASE_CHAIN_ID) {
         try {
             await activeProvider.request({
                 method: "wallet_switchEthereumChain",
                 params: [{ chainId: BASE_CHAIN_ID }],
             });
+            chainId = (await activeProvider.request({ method: "eth_chainId" }));
         }
         catch (err) {
-            const code = err && typeof err === "object" ? err.code : null;
-            logDebug("wallet_switchEthereumChain failed", { code, message: errorMessage(err) });
+            const code = err && typeof err === "object"
+                ? err.code
+                : null;
+            logDebug("wallet_switchEthereumChain failed", {
+                code,
+                message: errorMessage(err),
+            });
             if (code === 4902 || code === "4902") {
-                await activeProvider.request({
-                    method: "wallet_addEthereumChain",
-                    params: [BASE_CHAIN_PARAMS],
-                });
+                try {
+                    await activeProvider.request({
+                        method: "wallet_addEthereumChain",
+                        params: [BASE_CHAIN_PARAMS],
+                    });
+                    chainId = (await activeProvider.request({ method: "eth_chainId" }));
+                }
+                catch (addErr) {
+                    logError("wallet_addEthereumChain", addErr);
+                    setText(chainStatus, `Chain ${chainId} (rpc)`);
+                    return { chainId, useRpcFallback: true };
+                }
+            }
+            else if (isMethodUnsupported(err)) {
+                setText(chainStatus, `Chain ${chainId} (rpc)`);
+                return { chainId, useRpcFallback: true };
             }
             else {
                 throw err;
             }
         }
     }
-    chainId = (await activeProvider.request({ method: "eth_chainId" }));
-    setText(chainStatus, chainId === BASE_CHAIN_ID ? "Base (0x2105)" : `Chain ${chainId}`);
-    return chainId;
+    const isBase = chainId === BASE_CHAIN_ID;
+    setText(chainStatus, isBase ? "Base (0x2105)" : `Chain ${chainId}`);
+    return { chainId, useRpcFallback: !isBase };
 }
 async function readResponseText(res) {
     try {
@@ -347,21 +440,27 @@ async function connectWalletAndCheck() {
     try {
         const activeProvider = await getProvider();
         logDebug("Wallet: provider ready");
-        await ensureBaseChain(activeProvider);
-        const accounts = (await activeProvider.request({ method: "eth_requestAccounts" }));
-        if (!accounts || !accounts.length) {
-            throw new Error("No account returned");
-        }
+        const { useRpcFallback } = await ensureBaseChain(activeProvider);
+        const accounts = await requestAccounts(activeProvider);
         address = accounts[0];
         setText(walletStatus, formatAddress(address));
         logDebug("Wallet: account", formatAddress(address));
         setButtonLabel("Checking holdings...");
         setResult("idle", "Checking Degen Dogs ownership...");
         const data = encodeBalanceOf(address);
-        const result = (await activeProvider.request({
-            method: "eth_call",
-            params: [{ to: CONTRACT, data }, "latest"],
-        }));
+        let result;
+        let rpcNote = "";
+        if (useRpcFallback) {
+            rpcNote = " Using Base RPC for balance check.";
+            result = await rpcCallBase("eth_call", [{ to: CONTRACT, data }, "latest"]);
+            logDebug("Wallet: rpc fallback", BASE_RPC_URL);
+        }
+        else {
+            result = (await activeProvider.request({
+                method: "eth_call",
+                params: [{ to: CONTRACT, data }, "latest"],
+            }));
+        }
         const balance = parseHexToBigInt(result);
         setText(dogsStatus, balance.toString());
         logDebug("Wallet: balance", balance.toString());
@@ -371,10 +470,10 @@ async function connectWalletAndCheck() {
             ? " Wallet not linked to your Farcaster profile."
             : "";
         if (balance > 0n) {
-            setResult("ok", `Holder verified with ${balance} Degen Dogs.${verificationNote}`);
+            setResult("ok", `Holder verified with ${balance} Degen Dogs.${verificationNote}${rpcNote}`);
         }
         else {
-            setResult("warn", `No Degen Dogs found for this wallet.${verificationNote}`);
+            setResult("warn", `No Degen Dogs found for this wallet.${verificationNote}${rpcNote}`);
         }
     }
     catch (err) {
