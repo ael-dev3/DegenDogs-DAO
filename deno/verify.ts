@@ -1,7 +1,8 @@
 import { createClient, Errors } from "https://esm.sh/@farcaster/quick-auth@0.0.8?target=deno";
 
 const client = createClient();
-const appDomain = Deno.env.get("APP_DOMAIN") || "";
+const rawAppDomain = Deno.env.get("APP_DOMAIN") || "";
+const appDomain = normalizeDomain(rawAppDomain);
 const neynarApiKey = Deno.env.get("NEYNAR_API_KEY") || "";
 const neynarApiBase = Deno.env.get("NEYNAR_API_BASE") || "https://api.neynar.com";
 
@@ -23,6 +24,22 @@ function hostFromHeaders(headers: Headers) {
   const hostHeader = forwardedHost || headers.get("host") || "";
   const hostValue = hostHeader.split(",")[0]?.trim() || "";
   return hostValue.split(":")[0] || "";
+}
+
+function normalizeDomain(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    if (trimmed.includes("://")) {
+      return new URL(trimmed).hostname;
+    }
+  } catch {
+    // fall through to string parsing
+  }
+  const noPath = trimmed.split("/")[0] || "";
+  return noPath.split(":")[0] || "";
 }
 
 async function readToken(req: Request) {
@@ -133,14 +150,20 @@ Deno.serve(async (req) => {
 
     const domain = appDomain || hostFromHeaders(req.headers);
     if (!domain) {
-      return new Response(JSON.stringify({ error: "missing_domain" }), {
-        status: 500,
-        headers: {
-          ...corsHeaders(origin),
-          "content-type": "application/json; charset=utf-8",
-        },
-      });
-    }
+    return new Response(
+      JSON.stringify({
+        error: "missing_domain",
+        hint: "Set APP_DOMAIN to your Mini App host (no scheme), e.g. degendogs-dao.web.app",
+      }),
+      {
+      status: 500,
+      headers: {
+        ...corsHeaders(origin),
+        "content-type": "application/json; charset=utf-8",
+      },
+    },
+    );
+  }
 
     try {
       const payload = await client.verifyJwt({ token, domain });
@@ -209,15 +232,22 @@ Deno.serve(async (req) => {
         },
       );
     } catch (err) {
-      if (err instanceof Errors.InvalidTokenError) {
-        return new Response(JSON.stringify({ error: "invalid_token" }), {
-          status: 401,
-          headers: {
-            ...corsHeaders(origin),
-            "content-type": "application/json; charset=utf-8",
-          },
-        });
-      }
+    if (err instanceof Errors.InvalidTokenError) {
+      return new Response(
+        JSON.stringify({
+          error: "invalid_token",
+          expectedDomain: domain,
+          hint: "Set APP_DOMAIN to your Mini App host (no scheme), e.g. degendogs-dao.web.app",
+        }),
+        {
+        status: 401,
+        headers: {
+          ...corsHeaders(origin),
+          "content-type": "application/json; charset=utf-8",
+        },
+      },
+      );
+    }
       console.error("Verification failed:", err);
       return new Response(JSON.stringify({ error: "verification_failed" }), {
         status: 500,
