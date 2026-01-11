@@ -269,18 +269,47 @@ async function loadFirebaseConfig() {
     if (config) {
         return config;
     }
-    try {
-        const res = await fetch("/__/firebase/init.json");
-        if (!res.ok) {
+    const projectId = (document.body.dataset.firebaseProjectId || "").trim();
+    const hostingOrigins = projectId
+        ? [
+            `https://${projectId}.web.app`,
+            `https://${projectId}.firebaseapp.com`,
+        ]
+        : [];
+    const initCandidates = [
+        window.location.origin,
+        ...hostingOrigins,
+    ].filter((value, index, list) => value && list.indexOf(value) === index);
+    const fetchInitJson = async (origin) => {
+        const url = `${origin}/__/firebase/init.json`;
+        try {
+            const res = await fetch(url);
+            if (!res.ok) {
+                logDebug("Firebase init.json not ok", `${url} -> ${res.status}`);
+                return null;
+            }
+            const json = (await res.json());
+            const normalized = normalizeFirebaseConfig(json);
+            if (!normalized) {
+                logDebug("Firebase init.json missing fields", url);
+            }
+            return normalized;
+        }
+        catch (err) {
+            logDebug("Firebase init.json unavailable", {
+                url,
+                error: errorMessage(err),
+            });
             return null;
         }
-        const json = (await res.json());
-        return normalizeFirebaseConfig(json);
+    };
+    for (const origin of initCandidates) {
+        const initConfig = await fetchInitJson(origin);
+        if (initConfig) {
+            return initConfig;
+        }
     }
-    catch (err) {
-        logDebug("Firebase init.json unavailable", errorMessage(err));
-        return null;
-    }
+    return null;
 }
 function setPostsStatus(state, text) {
     postsStatus.dataset.state = state;
