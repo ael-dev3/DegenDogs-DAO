@@ -614,7 +614,8 @@ async function createThreadReply(postId, input, button, listEl, emptyEl, countEl
     }
     catch (err) {
         logError("Threads: create", err);
-        setPostsStatus("error", "Unable to post reply.");
+        const detail = truncate(errorMessage(err), 160);
+        setPostsStatus("error", `Unable to post reply. ${detail}`);
     }
     finally {
         setBusy(button, false);
@@ -697,7 +698,8 @@ async function createPost() {
     }
     catch (err) {
         logError("Posts: create", err);
-        setPostsStatus("error", "Unable to create post.");
+        const detail = truncate(errorMessage(err), 160);
+        setPostsStatus("error", `Unable to create post. ${detail}`);
     }
     finally {
         setBusy(postSubmit, false);
