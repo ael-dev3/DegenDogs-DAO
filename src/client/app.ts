@@ -29,8 +29,12 @@ const appVersion = (document.body.dataset.appVersion || "").trim() || "unknown";
 const apiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
 const apiOrigin = (apiOriginOverride || document.body.dataset.apiOrigin || "")
   .trim();
+const fallbackApiBase = resolveApiBase(
+  "https://degendogs-dao.ael-dev3.deno.net",
+);
 const apiBase = resolveApiBase(apiOrigin || window.location.origin);
 const apiVerifyUrl = `${apiBase}/api/verify`;
+const fallbackVerifyUrl = `${fallbackApiBase}/api/verify`;
 const authStatus = byId("auth-status");
 const walletStatus = byId("wallet-status");
 const chainStatus = byId("chain-status");
@@ -134,19 +138,24 @@ function logError(context: string, err: unknown) {
   }
 }
 
-function apiConfigLines() {
+function apiConfigLines(activeUrl: string) {
   return [
-    `URL: ${apiVerifyUrl}`,
+    `URL: ${activeUrl}`,
     `data-api-origin: ${apiOrigin || "(empty)"}`,
     `window.origin: ${window.location.origin}`,
+    `fallback: ${fallbackVerifyUrl}`,
     `version: ${appVersion}`,
   ];
 }
 
-function authEndpointErrorMessage(status: number, bodyText: string) {
-  const lines = [`Auth endpoint not found (HTTP ${status}).`];
+function authEndpointErrorMessage(
+  status: number,
+  bodyText: string,
+  activeUrl: string,
+) {
+  const lines = [`Auth endpoint not found (HTTP ${status}).`, `URL: ${activeUrl}`];
   if (debugEnabled) {
-    lines.push(...apiConfigLines());
+    lines.push(...apiConfigLines(activeUrl));
     if (bodyText) {
       lines.push(`body: ${truncate(bodyText, 260)}`);
     }
@@ -237,6 +246,33 @@ async function readResponseText(res: Response) {
   }
 }
 
+type AuthAttempt = {
+  res: Response;
+  bodyText: string;
+  parsed: VerifyResponse | { error?: string } | null;
+  url: string;
+};
+
+async function quickAuthFetch(url: string): Promise<AuthAttempt> {
+  logDebug("Auth: quickAuth.fetch", url);
+  const res = await sdk.quickAuth.fetch(url);
+  logDebug("Auth: response", `${res.status} ${res.statusText}`);
+  const traceId = res.headers.get("x-deno-trace-id");
+  if (traceId) {
+    logDebug("Auth: deno trace id", traceId);
+  }
+  const bodyText = await readResponseText(res);
+  let parsed: VerifyResponse | { error?: string } | null = null;
+  if (bodyText) {
+    try {
+      parsed = JSON.parse(bodyText) as VerifyResponse | { error?: string };
+    } catch {
+      logDebug("Auth: non-JSON response", bodyText);
+    }
+  }
+  return { res, bodyText, parsed, url };
+}
+
 async function debugProbe() {
   if (!debugEnabled) {
     return;
@@ -262,26 +298,35 @@ async function handleSignIn() {
   let signedIn = false;
   try {
     // Quick Auth triggers Farcaster sign-in if needed.
-    logDebug("Auth: quickAuth.fetch", apiVerifyUrl);
-    const res = await sdk.quickAuth.fetch(apiVerifyUrl);
-    logDebug("Auth: response", `${res.status} ${res.statusText}`);
-    const traceId = res.headers.get("x-deno-trace-id");
-    if (traceId) {
-      logDebug("Auth: deno trace id", traceId);
-    }
-    const bodyText = await readResponseText(res);
-    let parsed: VerifyResponse | { error?: string } | null = null;
-    if (bodyText) {
-      try {
-        parsed = JSON.parse(bodyText) as VerifyResponse | { error?: string };
-      } catch {
-        logDebug("Auth: non-JSON response", bodyText);
+    const attempt = await quickAuthFetch(apiVerifyUrl);
+    let res = attempt.res;
+    let bodyText = attempt.bodyText;
+    let parsed = attempt.parsed;
+    let activeAuthUrl = apiVerifyUrl;
+    if (
+      !res.ok &&
+      (res.status === 404 || res.status === 405) &&
+      fallbackVerifyUrl !== apiVerifyUrl
+    ) {
+      logDebug("Auth: retry fallback", fallbackVerifyUrl);
+      const fallback = await quickAuthFetch(fallbackVerifyUrl);
+      if (
+        fallback.res.ok ||
+        (fallback.res.status !== 404 && fallback.res.status !== 405)
+      ) {
+        res = fallback.res;
+        bodyText = fallback.bodyText;
+        parsed = fallback.parsed;
+        activeAuthUrl = fallbackVerifyUrl;
+        logDebug("Auth: using fallback", activeAuthUrl);
       }
     }
 
     if (!res.ok) {
       if (res.status === 404 || res.status === 405) {
-        throw new Error(authEndpointErrorMessage(res.status, bodyText));
+        throw new Error(
+          authEndpointErrorMessage(res.status, bodyText, activeAuthUrl),
+        );
       }
       const detail =
         parsed && "error" in parsed && parsed.error
