@@ -47,7 +47,11 @@ const chainStatus = byId("chain-status");
 const dogsStatus = byId("dogs-status");
 const resultBox = byId("result");
 const authButton = byId("auth-btn") as HTMLButtonElement;
-const authButtonLabel = authButton.textContent?.trim() || "Sign in & verify";
+const authButtonLabel =
+  authButton.textContent?.trim() || "Sign in & verify profile";
+const walletButton = byId("wallet-btn") as HTMLButtonElement;
+const walletButtonLabel =
+  walletButton.textContent?.trim() || "Connect wallet";
 const debugPanel = document.getElementById("debug-panel");
 const debugLog = document.getElementById("debug-log");
 const debugApi = document.getElementById("debug-api");
@@ -83,8 +87,8 @@ function setBusy(button: HTMLButtonElement, isBusy: boolean) {
   button.setAttribute("aria-busy", isBusy ? "true" : "false");
 }
 
-function setButtonLabel(text: string) {
-  authButton.textContent = text;
+function setButtonLabel(button: HTMLButtonElement, text: string) {
+  button.textContent = text;
 }
 
 function resolveApiBase(raw: string) {
@@ -200,6 +204,29 @@ function formatAddress(value: string | null) {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
+function normalizeAddress(value: string) {
+  const trimmed = value.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+function uniqueAddresses(addresses: string[]) {
+  const unique = new Set<string>();
+  for (const address of addresses) {
+    const normalized = normalizeAddress(address);
+    if (normalized) {
+      unique.add(normalized);
+    }
+  }
+  return Array.from(unique);
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
 function encodeBalanceOf(addr: string) {
   const clean = addr.toLowerCase().replace("0x", "");
   if (clean.length !== 40) {
@@ -240,6 +267,26 @@ function isMethodUnsupported(err: unknown) {
     code === 4200 ||
     code === "4200"
   );
+}
+
+function normalizeChainId(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `0x${value.toString(16)}`;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+      return `0x${trimmed.slice(2).toLowerCase()}`;
+    }
+    const asNumber = Number(trimmed);
+    if (Number.isFinite(asNumber)) {
+      return `0x${asNumber.toString(16)}`;
+    }
+  }
+  return null;
 }
 
 async function requestAccounts(activeProvider: EthereumProvider) {
@@ -300,6 +347,78 @@ async function rpcCallBase(method: string, params: unknown[]) {
   return json.result ?? "";
 }
 
+async function balanceOfAddress(address: string) {
+  const data = encodeBalanceOf(address);
+  const result = await rpcCallBase("eth_call", [{ to: CONTRACT, data }, "latest"]);
+  return parseHexToBigInt(result);
+}
+
+async function checkProfileHoldings() {
+  setText(walletStatus, "Profile only");
+  setText(chainStatus, "Base (rpc)");
+  setText(dogsStatus, "Checking...");
+  setResult("idle", "Checking verified addresses...");
+
+  const addresses = uniqueAddresses(verifiedAddresses);
+  const skipped = Math.max(0, verifiedAddresses.length - addresses.length);
+  if (skipped) {
+    logDebug("Profile: skipped invalid addresses", skipped);
+  }
+
+  if (!addresses.length) {
+    setText(dogsStatus, "0");
+    setResult(
+      "warn",
+      "No verified addresses on your Farcaster profile. Connect a wallet to check holdings.",
+    );
+    return { total: 0n, checked: 0, failed: 0 };
+  }
+
+  const results = await Promise.allSettled(
+    addresses.map((address) => balanceOfAddress(address)),
+  );
+  let total = 0n;
+  let checked = 0;
+  let failed = 0;
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      total += result.value;
+      checked += 1;
+    } else {
+      failed += 1;
+      logDebug("Profile: balanceOf failed", {
+        address: addresses[index],
+        error: errorMessage(result.reason),
+      });
+    }
+  });
+
+  if (!checked) {
+    setText(dogsStatus, "Error");
+    setResult("error", "Unable to check verified addresses right now.");
+    return { total, checked, failed };
+  }
+
+  setText(dogsStatus, total.toString());
+  const walletLabel = pluralize(checked, "wallet");
+  const failureNote = failed
+    ? ` ${failed} ${pluralize(failed, "address")} failed to load.`
+    : "";
+  if (total > 0n) {
+    setResult(
+      "ok",
+      `Verified addresses hold ${total} Degen Dogs across ${checked} ${walletLabel}.${failureNote}`,
+    );
+  } else {
+    setResult(
+      "warn",
+      `No Degen Dogs found across ${checked} verified ${walletLabel}.${failureNote}`,
+    );
+  }
+
+  return { total, checked, failed };
+}
+
 function formatErrorDetail(value: { error?: string; [key: string]: unknown }) {
   const base = value.error || "error";
   const extras = Object.entries(value)
@@ -336,48 +455,61 @@ async function getProvider() {
   return provider;
 }
 
-async function ensureBaseChain(activeProvider: EthereumProvider) {
+async function ensureBaseChain(
+  activeProvider: EthereumProvider,
+  allowSwitch = false,
+) {
   setText(chainStatus, "Checking...");
   let chainId: string | null = null;
   try {
-    chainId = (await activeProvider.request({ method: "eth_chainId" })) as string;
-    logDebug("Wallet chainId", chainId);
+    const rawChainId = await activeProvider.request({ method: "eth_chainId" });
+    chainId = normalizeChainId(rawChainId);
+    logDebug("Wallet chainId", chainId ?? rawChainId);
   } catch (err) {
     logError("wallet_chainId", err);
     setText(chainStatus, "Unknown (rpc)");
     return { chainId: null, useRpcFallback: true };
   }
 
-  if (chainId !== BASE_CHAIN_ID) {
+  if (allowSwitch && chainId !== BASE_CHAIN_ID) {
     try {
       await activeProvider.request({
         method: "wallet_switchEthereumChain",
         params: [{ chainId: BASE_CHAIN_ID }],
       });
-      chainId = (await activeProvider.request({ method: "eth_chainId" })) as string;
+      const rawNextChainId = await activeProvider.request({ method: "eth_chainId" });
+      chainId = normalizeChainId(rawNextChainId);
     } catch (err) {
       const code =
         err && typeof err === "object"
           ? (err as { code?: number | string }).code
           : null;
+      const message = errorMessage(err);
       logDebug("wallet_switchEthereumChain failed", {
         code,
-        message: errorMessage(err),
+        message,
       });
+      const messageLower = message.toLowerCase();
+      const isRejected =
+        code === 4001 ||
+        code === "4001" ||
+        code === "ACTION_REJECTED" ||
+        messageLower.includes("user rejected");
       if (code === 4902 || code === "4902") {
         try {
           await activeProvider.request({
             method: "wallet_addEthereumChain",
             params: [BASE_CHAIN_PARAMS],
           });
-          chainId = (await activeProvider.request({ method: "eth_chainId" })) as string;
+          const rawNextChainId = await activeProvider.request({ method: "eth_chainId" });
+          chainId = normalizeChainId(rawNextChainId);
         } catch (addErr) {
           logError("wallet_addEthereumChain", addErr);
-          setText(chainStatus, `Chain ${chainId} (rpc)`);
+          setText(chainStatus, chainId ? `Chain ${chainId} (rpc)` : "Unknown (rpc)");
           return { chainId, useRpcFallback: true };
         }
-      } else if (isMethodUnsupported(err)) {
-        setText(chainStatus, `Chain ${chainId} (rpc)`);
+      } else if (isMethodUnsupported(err) || isRejected) {
+        setText(chainStatus, chainId ? `Chain ${chainId} (rpc)` : "Unknown (rpc)");
         return { chainId, useRpcFallback: true };
       } else {
         throw err;
@@ -386,7 +518,10 @@ async function ensureBaseChain(activeProvider: EthereumProvider) {
   }
 
   const isBase = chainId === BASE_CHAIN_ID;
-  setText(chainStatus, isBase ? "Base (0x2105)" : `Chain ${chainId}`);
+  setText(
+    chainStatus,
+    isBase ? "Base (0x2105)" : chainId ? `Chain ${chainId}` : "Unknown (rpc)",
+  );
   return { chainId, useRpcFallback: !isBase };
 }
 
@@ -476,9 +611,12 @@ async function debugProbe() {
 
 async function handleSignIn() {
   setBusy(authButton, true);
-  setButtonLabel("Signing in...");
+  setButtonLabel(authButton, "Signing in...");
   setResult("idle", "Requesting Farcaster sign in...");
   setText(authStatus, "Signing in...");
+  setBusy(walletButton, true);
+  walletButton.disabled = true;
+  setButtonLabel(walletButton, walletButtonLabel);
 
   let signedIn = false;
   try {
@@ -550,6 +688,14 @@ async function handleSignIn() {
       verifiedAddressCount: verifiedAddresses.length,
     });
     signedIn = true;
+    try {
+      await checkProfileHoldings();
+    } catch (err) {
+      logError("Profile", err);
+      setResult("error", errorMessage(err));
+    }
+    walletButton.disabled = false;
+    setBusy(walletButton, false);
   } catch (err) {
     const msg = errorMessage(err);
     logError("Auth", err);
@@ -562,24 +708,49 @@ async function handleSignIn() {
     } else {
       setResult("error", msg);
     }
+    walletButton.disabled = true;
+    setBusy(walletButton, false);
   }
 
   hasSignedIn = signedIn;
-  if (signedIn) {
-    try {
-      await connectWalletAndCheck();
-    } catch (err) {
-      setResult("error", errorMessage(err));
-    }
-  }
-
   setBusy(authButton, false);
-  setButtonLabel(hasSignedIn ? "Recheck holder" : authButtonLabel);
+  setButtonLabel(authButton, hasSignedIn ? "Recheck profile" : authButtonLabel);
   return signedIn;
 }
 
+async function handleWalletCheck() {
+  if (!hasSignedIn) {
+    setResult("warn", "Sign in first to verify your profile.");
+    return false;
+  }
+
+  setBusy(walletButton, true);
+  setButtonLabel(walletButton, "Checking wallet...");
+  try {
+    await connectWalletAndCheck();
+    return true;
+  } catch (err) {
+    const message = errorMessage(err);
+    const lower = message.toLowerCase();
+    if (
+      lower.includes("no wallet provider") ||
+      lower.includes("does not expose accounts")
+    ) {
+      setResult(
+        "warn",
+        "Wallet provider not available. Open this mini app inside Farcaster to connect a wallet.",
+      );
+    } else {
+      setResult("error", message);
+    }
+    return false;
+  } finally {
+    setBusy(walletButton, false);
+    setButtonLabel(walletButton, "Recheck wallet");
+  }
+}
+
 async function connectWalletAndCheck() {
-  setButtonLabel("Connecting wallet...");
   setResult("idle", "Connecting Farcaster wallet...");
   setText(walletStatus, "Connecting...");
   setText(dogsStatus, "Checking...");
@@ -587,7 +758,7 @@ async function connectWalletAndCheck() {
   try {
     const activeProvider = await getProvider();
     logDebug("Wallet: provider ready");
-    const { useRpcFallback } = await ensureBaseChain(activeProvider);
+    const { chainId } = await ensureBaseChain(activeProvider, false);
 
     const accounts = await requestAccounts(activeProvider);
 
@@ -595,21 +766,15 @@ async function connectWalletAndCheck() {
     setText(walletStatus, formatAddress(address));
     logDebug("Wallet: account", formatAddress(address));
 
-    setButtonLabel("Checking holdings...");
     setResult("idle", "Checking Degen Dogs ownership...");
     const data = encodeBalanceOf(address);
-    let result: string;
-    let rpcNote = "";
-    if (useRpcFallback) {
-      rpcNote = " Using Base RPC for balance check.";
-      result = await rpcCallBase("eth_call", [{ to: CONTRACT, data }, "latest"]);
-      logDebug("Wallet: rpc fallback", BASE_RPC_URL);
-    } else {
-      result = (await activeProvider.request({
-        method: "eth_call",
-        params: [{ to: CONTRACT, data }, "latest"],
-      })) as string;
-    }
+    const rpcNote = " Read-only check via Base RPC.";
+    const chainNote =
+      chainId && chainId !== BASE_CHAIN_ID
+        ? ` Wallet is on ${chainId}.`
+        : "";
+    const result = await rpcCallBase("eth_call", [{ to: CONTRACT, data }, "latest"]);
+    logDebug("Wallet: rpc balance check", BASE_RPC_URL);
 
     const balance = parseHexToBigInt(result);
     setText(dogsStatus, balance.toString());
@@ -625,12 +790,12 @@ async function connectWalletAndCheck() {
     if (balance > 0n) {
       setResult(
         "ok",
-        `Holder verified with ${balance} Degen Dogs.${verificationNote}${rpcNote}`,
+        `Holder verified with ${balance} Degen Dogs.${verificationNote}${chainNote}${rpcNote}`,
       );
     } else {
       setResult(
         "warn",
-        `No Degen Dogs found for this wallet.${verificationNote}${rpcNote}`,
+        `No Degen Dogs found for this wallet.${verificationNote}${chainNote}${rpcNote}`,
       );
     }
   } catch (err) {
@@ -644,6 +809,8 @@ async function connectWalletAndCheck() {
 
 async function init() {
   authButton.addEventListener("click", handleSignIn);
+  walletButton.addEventListener("click", handleWalletCheck);
+  walletButton.disabled = true;
   if (debugPanel) {
     debugPanel.hidden = !debugEnabled;
   }
