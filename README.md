@@ -38,7 +38,7 @@ auth response with Farcaster profile data and verified addresses.
 
 ## Firestore setup (posts + votes)
 
-The Mini App can store posts and votes in Firestore. Add your Firebase web
+The Mini App can store posts and votes in Firestore. Add your Firebase web      
 config to `public/index.html`:
 
 - `data-firebase-api-key`
@@ -47,13 +47,17 @@ config to `public/index.html`:
 - `data-firebase-app-id`
 - Optional: `data-firebase-messaging-sender-id`, `data-firebase-storage-bucket`
 
-To apply the sample rules in `firestore.rules`, run:
+Enable Anonymous Authentication in Firebase (Authentication -> Sign-in method),
+because posts/votes require an authenticated Firebase user.
+
+To apply the Firestore rules in `firestore.rules`, run:
 
 `firebase deploy --only firestore`
 
 The Spark plan should be enough for a small community.
 
-Note: the sample rules are open and should be tightened before production.
+Note: the rules allow reads for everyone and restrict writes to authenticated
+users. Tighten further if you add a backend or stronger identity checks.       
 
 ## Deno Deploy verifier
 

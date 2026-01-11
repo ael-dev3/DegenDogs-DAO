@@ -1,6 +1,11 @@
 import { sdk } from "https://esm.sh/@farcaster/miniapp-sdk";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
 import {
+  getAuth,
+  onAuthStateChanged,
+  signInAnonymously,
+} from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
+import {
   addDoc,
   collection,
   doc,
@@ -98,6 +103,10 @@ let walletHoldings: bigint | null = null;
 let isHolder = false;
 let firestoreDb: any = null;
 let firestoreReady = false;
+let firebaseAuth: any = null;
+let firebaseUser: { uid: string } | null = null;
+let firebaseAuthReady = false;
+let firebaseAuthError = false;
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -322,7 +331,7 @@ function updateHolderState() {
 }
 
 function updatePostFormState() {
-  const canWrite = firestoreReady && hasSignedIn && isHolder;
+  const canWrite = firestoreReady && !!firebaseUser && hasSignedIn && isHolder;
   postSubmit.disabled = !canWrite;
   postTitle.disabled = !firestoreReady;
   postBody.disabled = !firestoreReady;
@@ -333,6 +342,17 @@ function updatePostFormState() {
     return;
   }
   postsPanel.dataset.state = canWrite ? "ready" : "readonly";
+  if (firebaseAuthError) {
+    setPostsStatus("error", "Firebase auth failed to initialize.");
+    return;
+  }
+  if (!firebaseUser) {
+    const message = firebaseAuthReady
+      ? "Firebase auth not ready. Enable anonymous auth in Firebase."
+      : "Connecting to Firebase...";
+    setPostsStatus("warn", message);
+    return;
+  }
   if (!hasSignedIn) {
     setPostsStatus("warn", "Sign in to create posts and vote.");
     return;
@@ -401,7 +421,8 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     const voteButton = document.createElement("button");
     voteButton.type = "button";
     voteButton.textContent = "Vote";
-    voteButton.disabled = !firestoreReady || !hasSignedIn || !isHolder;
+    voteButton.disabled =
+      !firestoreReady || !firebaseUser || !hasSignedIn || !isHolder;
     const voteCount = document.createElement("span");
     voteCount.className = "vote-count";
     const countValue =
@@ -450,6 +471,10 @@ async function createPost() {
     setPostsStatus("warn", "Firestore is not configured yet.");
     return;
   }
+  if (!firebaseUser) {
+    setPostsStatus("warn", "Firebase auth not ready yet.");
+    return;
+  }
   if (!hasSignedIn) {
     setPostsStatus("warn", "Sign in to create a post.");
     return;
@@ -462,6 +487,7 @@ async function createPost() {
     setPostsStatus("warn", "Unable to determine your Farcaster ID.");
     return;
   }
+  const uid = firebaseUser.uid;
   const title = postTitle.value.trim();
   const body = postBody.value.trim();
   if (!title || !body) {
@@ -483,6 +509,7 @@ async function createPost() {
       fid,
       username: userProfile?.username || undefined,
       displayName: userProfile?.displayName || undefined,
+      uid,
       createdAt: serverTimestamp(),
       voteCount: 0,
     });
@@ -503,7 +530,7 @@ async function voteOnPost(
   button: HTMLButtonElement,
   countEl: HTMLElement,
 ) {
-  if (!firestoreDb || !fid || !hasSignedIn) {
+  if (!firestoreDb || !firebaseUser || !fid || !hasSignedIn) {
     setPostsStatus("warn", "Sign in to vote.");
     return;
   }
@@ -512,18 +539,20 @@ async function voteOnPost(
     return;
   }
 
+  const uid = firebaseUser.uid;
   button.disabled = true;
   try {
     let didVote = false;
     await runTransaction(firestoreDb, async (tx: any) => {
       const postRef = doc(firestoreDb, "posts", postId);
-      const voteRef = doc(firestoreDb, "posts", postId, "votes", String(fid));
+      const voteRef = doc(firestoreDb, "posts", postId, "votes", uid);
       const voteSnap = await tx.get(voteRef);
       if (voteSnap.exists()) {
         return;
       }
       tx.set(voteRef, {
         fid,
+        uid,
         createdAt: serverTimestamp(),
       });
       tx.update(postRef, {
@@ -564,12 +593,39 @@ function initFirestore() {
     firestoreDb = getFirestore(app);
     firestoreReady = true;
     updatePostFormState();
+    void initFirebaseAuth(app);
     return firestoreDb;
   } catch (err) {
     logError("Firestore init", err);
     setPostsStatus("error", "Firestore failed to initialize.");
     return null;
   }
+}
+
+async function initFirebaseAuth(app: unknown) {
+  if (firebaseAuth) {
+    return firebaseAuth;
+  }
+  try {
+    firebaseAuth = getAuth(app);
+    firebaseAuthReady = true;
+    onAuthStateChanged(firebaseAuth, (user: any) => {
+      firebaseUser = user ? { uid: user.uid } : null;
+      updatePostFormState();
+    });
+    if (!firebaseAuth.currentUser) {
+      await signInAnonymously(firebaseAuth);
+    } else {
+      firebaseUser = { uid: firebaseAuth.currentUser.uid };
+      updatePostFormState();
+    }
+  } catch (err) {
+    firebaseAuthError = true;
+    logError("Firebase auth", err);
+    setPostsStatus("error", "Firebase auth failed to initialize.");
+    updatePostFormState();
+  }
+  return firebaseAuth;
 }
 
 function encodeBalanceOf(addr: string) {

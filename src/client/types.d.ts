@@ -6,6 +6,12 @@ declare module "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js" {
   export const initializeApp: any;
 }
 
+declare module "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js" {
+  export const getAuth: any;
+  export const onAuthStateChanged: any;
+  export const signInAnonymously: any;
+}
+
 declare module "https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore.js" {
   export const addDoc: any;
   export const collection: any;

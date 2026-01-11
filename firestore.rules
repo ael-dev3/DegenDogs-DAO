@@ -1,9 +1,64 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // TODO: tighten rules before production. This is an open ruleset.
-    match /{document=**} {
-      allow read, write: if true;
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidPost(data) {
+      return data.keys().hasOnly([
+        "title",
+        "body",
+        "fid",
+        "username",
+        "displayName",
+        "createdAt",
+        "voteCount",
+        "uid"
+      ]) &&
+      data.title is string &&
+      data.title.size() > 0 &&
+      data.title.size() <= 120 &&
+      data.body is string &&
+      data.body.size() > 0 &&
+      data.body.size() <= 1200 &&
+      data.fid is int &&
+      data.voteCount is int &&
+      data.voteCount >= 0 &&
+      data.uid == request.auth.uid &&
+      data.createdAt is timestamp &&
+      (!("username" in data) || data.username is string) &&
+      (!("displayName" in data) || data.displayName is string);
+    }
+
+    function isVoteIncrement() {
+      return request.resource.data.keys().hasOnly(resource.data.keys()) &&
+        request.resource.data.title == resource.data.title &&
+        request.resource.data.body == resource.data.body &&
+        request.resource.data.fid == resource.data.fid &&
+        request.resource.data.username == resource.data.username &&
+        request.resource.data.displayName == resource.data.displayName &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.voteCount == resource.data.voteCount + 1;
+    }
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidPost(request.resource.data);
+      allow update: if isSignedIn() && isVoteIncrement();
+      allow delete: if false;
+
+      match /votes/{voteId} {
+        allow read: if true;
+        allow create: if isSignedIn() &&
+          request.resource.data.keys().hasOnly(["fid", "uid", "createdAt"]) &&
+          request.resource.data.uid == request.auth.uid &&
+          request.resource.data.fid is int &&
+          request.resource.data.createdAt is timestamp &&
+          voteId == request.auth.uid;
+        allow update, delete: if false;
+      }
     }
   }
 }
