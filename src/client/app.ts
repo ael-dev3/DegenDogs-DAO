@@ -90,6 +90,7 @@ const debugApi = document.getElementById("debug-api");
 const debugMode = document.getElementById("debug-mode");
 const debugVersion = document.getElementById("debug-version");
 const debugLines: string[] = [];
+const scriptLoadCache = new Map<string, Promise<void>>();
 
 let provider: EthereumProvider | null = null;
 let address: string | null = null;
@@ -347,6 +348,56 @@ function getFirebaseConfig() {
   return normalizeFirebaseConfig(raw);
 }
 
+function loadScriptOnce(src: string) {
+  if (scriptLoadCache.has(src)) {
+    return scriptLoadCache.get(src) as Promise<void>;
+  }
+  const promise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+    document.head.appendChild(script);
+  });
+  scriptLoadCache.set(src, promise);
+  return promise;
+}
+
+async function loadFirebaseConfigFromInitJs(origin: string) {
+  try {
+    const existing = (window as typeof window & { firebase?: any }).firebase;
+    if (existing?.apps?.length) {
+      return normalizeFirebaseConfig(existing.app().options ?? {});
+    }
+  } catch (err) {
+    logDebug("Firebase compat check failed", errorMessage(err));
+  }
+
+  try {
+    await loadScriptOnce(
+      "https://www.gstatic.com/firebasejs/10.12.3/firebase-app-compat.js",
+    );
+    await loadScriptOnce(`${origin}/__/firebase/init.js`);
+    const compat = (window as typeof window & { firebase?: any }).firebase;
+    if (!compat?.apps?.length) {
+      return null;
+    }
+    return normalizeFirebaseConfig(compat.app().options ?? {});
+  } catch (err) {
+    logDebug("Firebase init.js unavailable", {
+      origin,
+      error: errorMessage(err),
+    });
+    return null;
+  }
+}
+
 async function loadFirebaseConfig() {
   const config = getFirebaseConfig();
   if (config) {
@@ -390,6 +441,13 @@ async function loadFirebaseConfig() {
 
   for (const origin of initCandidates) {
     const initConfig = await fetchInitJson(origin);
+    if (initConfig) {
+      return initConfig;
+    }
+  }
+
+  for (const origin of initCandidates) {
+    const initConfig = await loadFirebaseConfigFromInitJs(origin);
     if (initConfig) {
       return initConfig;
     }
