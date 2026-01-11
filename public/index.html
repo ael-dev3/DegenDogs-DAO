@@ -43,6 +43,18 @@
 
         <div id="result" class="result" data-state="idle" role="status" aria-live="polite">Ready to sign in and verify.</div>
 
+        <div id="debug-panel" class="debug" hidden>
+          <div class="debug-row">
+            <span class="label">API base</span>
+            <span id="debug-api" class="value"></span>
+          </div>
+          <div class="debug-row">
+            <span class="label">Debug</span>
+            <span id="debug-mode" class="value"></span>
+          </div>
+          <pre id="debug-log" class="debug-log" aria-live="polite"></pre>
+        </div>
+
         <div class="foot">
           <span>Contract</span>
           <a href="https://basescan.org/address/0x09154248fFDbaF8aA877aE8A4bf8cE1503596428" target="_blank" rel="noreferrer">0x0915...6428</a>

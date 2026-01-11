@@ -8,7 +8,11 @@ const BASE_CHAIN_PARAMS = {
     rpcUrls: ["https://base.publicnode.com"],
     blockExplorerUrls: ["https://basescan.org"],
 };
-const apiOrigin = (document.body.dataset.apiOrigin || "").trim();
+const urlParams = new URLSearchParams(window.location.search);
+const debugEnabled = urlParams.has("debug") || window.localStorage.getItem("debug") === "1";
+const apiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
+const apiOrigin = (apiOriginOverride || document.body.dataset.apiOrigin || "")
+    .trim();
 const apiBase = apiOrigin || window.location.origin;
 const authStatus = byId("auth-status");
 const walletStatus = byId("wallet-status");
@@ -17,6 +21,11 @@ const dogsStatus = byId("dogs-status");
 const resultBox = byId("result");
 const authButton = byId("auth-btn");
 const authButtonLabel = authButton.textContent?.trim() || "Sign in & verify";
+const debugPanel = document.getElementById("debug-panel");
+const debugLog = document.getElementById("debug-log");
+const debugApi = document.getElementById("debug-api");
+const debugMode = document.getElementById("debug-mode");
+const debugLines = [];
 let provider = null;
 let address = null;
 let fid = null;
@@ -43,6 +52,49 @@ function setBusy(button, isBusy) {
 function setButtonLabel(text) {
     authButton.textContent = text;
 }
+function setDebugValue(el, text) {
+    if (el) {
+        el.textContent = text;
+    }
+}
+function truncate(value, max = 260) {
+    if (value.length <= max) {
+        return value;
+    }
+    return `${value.slice(0, max)}...`;
+}
+function logDebug(message, detail) {
+    if (!debugEnabled || !debugLog) {
+        return;
+    }
+    const stamp = new Date().toISOString().slice(11, 19);
+    let line = `[${stamp}] ${message}`;
+    if (detail !== undefined) {
+        let detailText = "";
+        try {
+            detailText =
+                typeof detail === "string" ? detail : JSON.stringify(detail, null, 2);
+        }
+        catch {
+            detailText = String(detail);
+        }
+        line += `\n${truncate(detailText, 1200)}`;
+    }
+    debugLines.push(line);
+    if (debugLines.length > 200) {
+        debugLines.shift();
+    }
+    debugLog.textContent = debugLines.join("\n\n");
+    if (console && console.debug) {
+        console.debug(message, detail);
+    }
+}
+function logError(context, err) {
+    logDebug(`${context} error`, errorMessage(err));
+    if (err instanceof Error && err.stack) {
+        logDebug(`${context} stack`, truncate(err.stack, 1200));
+    }
+}
 function formatAddress(value) {
     if (!value || value.length < 10) {
         return value || "";
@@ -66,7 +118,12 @@ function errorMessage(err) {
     if (err instanceof Error) {
         return err.message;
     }
-    return String(err);
+    try {
+        return JSON.stringify(err);
+    }
+    catch {
+        return String(err);
+    }
 }
 async function getProvider() {
     if (provider) {
@@ -82,6 +139,7 @@ async function getProvider() {
 async function ensureBaseChain(activeProvider) {
     setText(chainStatus, "Switching...");
     let chainId = (await activeProvider.request({ method: "eth_chainId" }));
+    logDebug("Wallet chainId", chainId);
     if (chainId !== BASE_CHAIN_ID) {
         try {
             await activeProvider.request({
@@ -91,6 +149,7 @@ async function ensureBaseChain(activeProvider) {
         }
         catch (err) {
             const code = err && typeof err === "object" ? err.code : null;
+            logDebug("wallet_switchEthereumChain failed", { code, message: errorMessage(err) });
             if (code === 4902 || code === "4902") {
                 await activeProvider.request({
                     method: "wallet_addEthereumChain",
@@ -106,6 +165,30 @@ async function ensureBaseChain(activeProvider) {
     setText(chainStatus, chainId === BASE_CHAIN_ID ? "Base (0x2105)" : `Chain ${chainId}`);
     return chainId;
 }
+async function readResponseText(res) {
+    try {
+        return await res.text();
+    }
+    catch {
+        return "";
+    }
+}
+async function debugProbe() {
+    if (!debugEnabled) {
+        return;
+    }
+    try {
+        const res = await fetch(`${apiBase}/api/verify`, { method: "GET" });
+        logDebug("Probe GET /api/verify", `${res.status} ${res.statusText}`);
+        const text = await readResponseText(res);
+        if (text) {
+            logDebug("Probe body", text);
+        }
+    }
+    catch (err) {
+        logError("Probe", err);
+    }
+}
 async function handleSignIn() {
     setBusy(authButton, true);
     setButtonLabel("Signing in...");
@@ -114,16 +197,38 @@ async function handleSignIn() {
     let signedIn = false;
     try {
         // Quick Auth triggers Farcaster sign-in if needed.
+        logDebug("Auth: quickAuth.fetch", `${apiBase}/api/verify`);
         const res = await sdk.quickAuth.fetch(`${apiBase}/api/verify`);
+        logDebug("Auth: response", `${res.status} ${res.statusText}`);
+        const traceId = res.headers.get("x-deno-trace-id");
+        if (traceId) {
+            logDebug("Auth: deno trace id", traceId);
+        }
+        const bodyText = await readResponseText(res);
+        let parsed = null;
+        if (bodyText) {
+            try {
+                parsed = JSON.parse(bodyText);
+            }
+            catch {
+                logDebug("Auth: non-JSON response", bodyText);
+            }
+        }
         if (!res.ok) {
             if (res.status === 404 || res.status === 405) {
                 throw new Error("Auth endpoint not found. Deploy the verifier and set data-api-origin.");
             }
-            const errBody = await res.json().catch(() => null);
-            const detail = errBody && errBody.error ? errBody.error : `HTTP ${res.status}`;
+            const detail = parsed && "error" in parsed && parsed.error
+                ? parsed.error
+                : bodyText
+                    ? truncate(bodyText)
+                    : `HTTP ${res.status}`;
             throw new Error(`Auth failed: ${detail}`);
         }
-        const data = (await res.json());
+        if (!parsed || !("fid" in parsed)) {
+            throw new Error("Auth failed: invalid response body");
+        }
+        const data = parsed;
         fid = data.fid;
         verifiedAddresses = Array.isArray(data.verifiedEthAddresses)
             ? data.verifiedEthAddresses
@@ -136,10 +241,16 @@ async function handleSignIn() {
         setResult("ok", data.displayName
             ? `${data.displayName} signed in.`
             : "Farcaster sign in verified.");
+        logDebug("Auth: verified", {
+            fid,
+            username: data.username,
+            verifiedAddressCount: verifiedAddresses.length,
+        });
         signedIn = true;
     }
     catch (err) {
         const msg = errorMessage(err);
+        logError("Auth", err);
         setText(authStatus, "Not signed in");
         if (msg.toLowerCase().includes("fetch")) {
             setResult("error", "Auth server not reachable. Set data-api-origin in index.html.");
@@ -168,6 +279,7 @@ async function connectWalletAndCheck() {
     setText(dogsStatus, "Checking...");
     try {
         const activeProvider = await getProvider();
+        logDebug("Wallet: provider ready");
         await ensureBaseChain(activeProvider);
         const accounts = (await activeProvider.request({ method: "eth_requestAccounts" }));
         if (!accounts || !accounts.length) {
@@ -175,6 +287,7 @@ async function connectWalletAndCheck() {
         }
         address = accounts[0];
         setText(walletStatus, formatAddress(address));
+        logDebug("Wallet: account", formatAddress(address));
         setButtonLabel("Checking holdings...");
         setResult("idle", "Checking Degen Dogs ownership...");
         const data = encodeBalanceOf(address);
@@ -184,6 +297,7 @@ async function connectWalletAndCheck() {
         }));
         const balance = parseHexToBigInt(result);
         setText(dogsStatus, balance.toString());
+        logDebug("Wallet: balance", balance.toString());
         const normalizedAddress = address.toLowerCase();
         const hasVerifiedMatch = verifiedAddresses.some((addr) => addr.toLowerCase() === normalizedAddress);
         const verificationNote = verifiedAddresses.length && !hasVerifiedMatch
@@ -200,15 +314,35 @@ async function connectWalletAndCheck() {
         setText(walletStatus, "Not connected");
         setText(chainStatus, "Unknown");
         setText(dogsStatus, "Unchecked");
+        logError("Wallet", err);
         throw err;
     }
 }
 async function init() {
     authButton.addEventListener("click", handleSignIn);
+    if (debugPanel) {
+        debugPanel.hidden = !debugEnabled;
+    }
+    if (debugEnabled) {
+        setDebugValue(debugApi, apiBase);
+        const originNote = apiOrigin
+            ? `apiOrigin=${apiOrigin}`
+            : "apiOrigin=window.location";
+        setDebugValue(debugMode, `on (${originNote}, crossOrigin=${apiBase !== window.location.origin})`);
+        logDebug("Debug enabled");
+        logDebug("Location", window.location.href);
+        logDebug("API base", apiBase);
+        if (apiOriginOverride) {
+            logDebug("API override", apiOriginOverride);
+        }
+        debugProbe();
+    }
     try {
         await sdk.actions.ready();
+        logDebug("SDK ready");
     }
     catch (err) {
+        logError("SDK ready", err);
         setResult("warn", "Not running inside a Farcaster host.");
     }
 }
