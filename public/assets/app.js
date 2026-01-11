@@ -233,14 +233,14 @@ function normalizeFirebaseConfig(raw) {
         ? raw.messagingSenderId.trim()
         : "";
     const storageBucket = typeof raw.storageBucket === "string" ? raw.storageBucket.trim() : "";
-    if (!apiKey || !authDomain || !projectId || !appId) {
+    if (!apiKey || !authDomain || !projectId) {
         return null;
     }
     return {
         apiKey,
         authDomain,
         projectId,
-        appId,
+        appId: appId || undefined,
         messagingSenderId: messagingSenderId || undefined,
         storageBucket: storageBucket || undefined,
     };
@@ -549,7 +549,13 @@ async function initFirestore() {
     catch (err) {
         firestoreInitInProgress = false;
         logError("Firestore init", err);
-        setPostsStatus("error", "Firestore failed to initialize.");
+        const message = errorMessage(err).toLowerCase();
+        if (message.includes("appid") || message.includes("app id")) {
+            setPostsStatus("error", "Firebase config is missing appId. Create a Firebase web app or set data-firebase-app-id.");
+        }
+        else {
+            setPostsStatus("error", "Firestore failed to initialize.");
+        }
         return null;
     }
 }
