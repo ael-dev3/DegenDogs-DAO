@@ -555,6 +555,16 @@ function optionalProfileFields(
   return data;
 }
 
+function stripUndefined<T extends Record<string, unknown>>(data: T) {
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      cleaned[key] = value;
+    }
+  }
+  return cleaned as T;
+}
+
 function renderPosts(posts: Array<Record<string, unknown>>) {
   postsList.innerHTML = "";
   if (!posts.length) {
@@ -814,13 +824,14 @@ async function createThreadReply(
     const postRef = doc(firestoreDb, "posts", postId);
     const profileFields = optionalProfileFields(userProfile);
     await runTransaction(firestoreDb, async (tx: any) => {
-      tx.set(threadDoc, {
+      const payload = stripUndefined({
         body,
         fid,
         uid,
-        ...profileFields,
         createdAt: serverTimestamp(),
+        ...profileFields,
       });
+      tx.set(threadDoc, payload);
       tx.update(postRef, {
         threadCount: increment(1),
       });
@@ -902,16 +913,17 @@ async function createPost() {
   try {
     const postsRef = collection(firestoreDb, "posts");
     const profileFields = optionalProfileFields(userProfile);
-    await addDoc(postsRef, {
+    const payload = stripUndefined({
       title,
       body,
       fid,
-      ...profileFields,
       uid,
       createdAt: serverTimestamp(),
       voteCount: 0,
       threadCount: 0,
+      ...profileFields,
     });
+    await addDoc(postsRef, payload);
     postTitle.value = "";
     postBody.value = "";
     setPostsStatus("ok", "Post created.");
