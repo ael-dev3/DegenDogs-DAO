@@ -14,6 +14,7 @@ service cloud.firestore {
         "displayName",
         "createdAt",
         "voteCount",
+        "threadCount",
         "uid"
       ]) &&
       data.title is string &&
@@ -25,14 +26,63 @@ service cloud.firestore {
       data.fid is int &&
       data.voteCount is int &&
       data.voteCount >= 0 &&
+      data.threadCount is int &&
+      data.threadCount >= 0 &&
       data.uid == request.auth.uid &&
       data.createdAt is timestamp &&
       (!("username" in data) || data.username is string) &&
       (!("displayName" in data) || data.displayName is string);
     }
 
+    function baseVoteCount() {
+      return resource.data.voteCount is int ? resource.data.voteCount : 0;
+    }
+
+    function baseThreadCount() {
+      return resource.data.threadCount is int ? resource.data.threadCount : 0;
+    }
+
+    function threadCountUnchanged() {
+      return (!resource.data.keys().hasAny(["threadCount"]) &&
+        !request.resource.data.keys().hasAny(["threadCount"])) ||
+        request.resource.data.threadCount == baseThreadCount();
+    }
+
     function isVoteIncrement() {
-      return request.resource.data.keys().hasOnly(resource.data.keys()) &&
+      return request.resource.data.keys().hasOnly([
+        "title",
+        "body",
+        "fid",
+        "username",
+        "displayName",
+        "createdAt",
+        "voteCount",
+        "threadCount",
+        "uid"
+      ]) &&
+        request.resource.data.title == resource.data.title &&
+        request.resource.data.body == resource.data.body &&
+        request.resource.data.fid == resource.data.fid &&
+        request.resource.data.username == resource.data.username &&
+        request.resource.data.displayName == resource.data.displayName &&       
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        threadCountUnchanged() &&
+        request.resource.data.voteCount == baseVoteCount() + 1;
+    }
+
+    function isThreadIncrement() {
+      return request.resource.data.keys().hasOnly([
+        "title",
+        "body",
+        "fid",
+        "username",
+        "displayName",
+        "createdAt",
+        "voteCount",
+        "threadCount",
+        "uid"
+      ]) &&
         request.resource.data.title == resource.data.title &&
         request.resource.data.body == resource.data.body &&
         request.resource.data.fid == resource.data.fid &&
@@ -40,23 +90,49 @@ service cloud.firestore {
         request.resource.data.displayName == resource.data.displayName &&
         request.resource.data.uid == resource.data.uid &&
         request.resource.data.createdAt == resource.data.createdAt &&
-        request.resource.data.voteCount == resource.data.voteCount + 1;
+        request.resource.data.voteCount == baseVoteCount() &&
+        request.resource.data.threadCount == baseThreadCount() + 1;
+    }
+
+    function isValidThread(data) {
+      return data.keys().hasOnly([
+        "body",
+        "fid",
+        "uid",
+        "username",
+        "displayName",
+        "createdAt"
+      ]) &&
+      data.body is string &&
+      data.body.size() > 0 &&
+      data.body.size() <= 800 &&
+      data.fid is int &&
+      data.uid == request.auth.uid &&
+      data.createdAt is timestamp &&
+      (!("username" in data) || data.username is string) &&
+      (!("displayName" in data) || data.displayName is string);
     }
 
     match /posts/{postId} {
       allow read: if true;
-      allow create: if isSignedIn() && isValidPost(request.resource.data);
-      allow update: if isSignedIn() && isVoteIncrement();
+      allow create: if isSignedIn() && isValidPost(request.resource.data);      
+      allow update: if isSignedIn() && (isVoteIncrement() || isThreadIncrement());
       allow delete: if false;
 
       match /votes/{voteId} {
         allow read: if true;
         allow create: if isSignedIn() &&
-          request.resource.data.keys().hasOnly(["fid", "uid", "createdAt"]) &&
+          request.resource.data.keys().hasOnly(["fid", "uid", "createdAt"]) &&  
           request.resource.data.uid == request.auth.uid &&
           request.resource.data.fid is int &&
           request.resource.data.createdAt is timestamp &&
           voteId == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /threads/{threadId} {
+        allow read: if true;
+        allow create: if isSignedIn() && isValidThread(request.resource.data);
         allow update, delete: if false;
       }
     }

@@ -41,6 +41,10 @@ const BASE_CHAIN_PARAMS = {
   blockExplorerUrls: ["https://basescan.org"],
 };
 const BASE_RPC_URL = BASE_CHAIN_PARAMS.rpcUrls[0] || "";
+const POST_TITLE_MAX = 120;
+const POST_BODY_MAX = 1200;
+const THREAD_BODY_MAX = 800;
+const THREADS_LIMIT = 8;
 
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled =
@@ -419,15 +423,18 @@ function updatePostFormState() {
       : "Firestore is not configured yet.";
     setPostsStatus(status, message);
     postsPanel.dataset.state = "disabled";
+    updatePostListControls();
     return;
   }
   postsPanel.dataset.state = canWrite ? "ready" : "readonly";
   if (firebaseAuthError) {
     setPostsStatus("error", "Firebase auth failed to initialize.");
+    updatePostListControls();
     return;
   }
   if (firebaseAuthPending) {
     setPostsStatus("idle", "Connecting to Firebase...");
+    updatePostListControls();
     return;
   }
   if (!firebaseUser) {
@@ -435,10 +442,12 @@ function updatePostFormState() {
       ? "Firebase auth not ready. Enable anonymous auth in Firebase."
       : "Connecting to Firebase...";
     setPostsStatus("warn", message);
+    updatePostListControls();
     return;
   }
   if (!hasSignedIn) {
     setPostsStatus("warn", "Sign in to create posts and vote.");
+    updatePostListControls();
     return;
   }
   if (!isHolder) {
@@ -446,9 +455,11 @@ function updatePostFormState() {
       "warn",
       "Only Degen Dogs holders can create posts or vote.",
     );
+    updatePostListControls();
     return;
   }
   setPostsStatus("ok", "Ready to post and vote.");
+  updatePostListControls();
 }
 
 function formatPostDate(value: unknown) {
@@ -478,6 +489,7 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     return;
   }
   postsEmpty.hidden = true;
+  const canInteract = firestoreReady && !!firebaseUser && hasSignedIn && isHolder;
   for (const post of posts) {
     const card = document.createElement("article");
     card.className = "post-card";
@@ -505,8 +517,8 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     const voteButton = document.createElement("button");
     voteButton.type = "button";
     voteButton.textContent = "Vote";
-    voteButton.disabled =
-      !firestoreReady || !firebaseUser || !hasSignedIn || !isHolder;
+    voteButton.disabled = !canInteract;
+    voteButton.dataset.postVote = "1";
     const voteCount = document.createElement("span");
     voteCount.className = "vote-count";
     const countValue =
@@ -520,10 +532,238 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     actions.appendChild(voteButton);
     actions.appendChild(voteCount);
 
+    const threadSection = document.createElement("div");
+    threadSection.className = "thread-section";
+
+    const threadHeader = document.createElement("div");
+    threadHeader.className = "thread-header";
+    const threadTitle = document.createElement("span");
+    threadTitle.textContent = "Thread";
+    const threadCount = document.createElement("span");
+    threadCount.className = "thread-count";
+    const threadCountValue =
+      typeof post.threadCount === "number" ? post.threadCount : 0;
+    threadCount.textContent = `${threadCountValue} replies`;
+    threadCount.dataset.total = String(threadCountValue);
+    threadHeader.appendChild(threadTitle);
+    threadHeader.appendChild(threadCount);
+
+    const threadList = document.createElement("div");
+    threadList.className = "thread-list";
+    const threadEmpty = document.createElement("div");
+    threadEmpty.className = "thread-empty";
+    threadEmpty.textContent = "Loading replies...";
+    threadEmpty.hidden = false;
+    threadList.appendChild(threadEmpty);
+
+    const threadForm = document.createElement("form");
+    threadForm.className = "thread-form";
+    const threadInput = document.createElement("textarea");
+    threadInput.className = "thread-input";
+    threadInput.rows = 2;
+    threadInput.maxLength = THREAD_BODY_MAX;
+    threadInput.placeholder = "Write a reply";
+    threadInput.disabled = !canInteract;
+    threadInput.dataset.threadInput = "1";
+    const threadSubmit = document.createElement("button");
+    threadSubmit.type = "submit";
+    threadSubmit.textContent = "Reply";
+    threadSubmit.disabled = !canInteract;
+    threadSubmit.dataset.threadSubmit = "1";
+
+    threadForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void createThreadReply(
+        String(post.id),
+        threadInput,
+        threadSubmit,
+        threadList,
+        threadEmpty,
+        threadCount,
+      );
+    });
+
+    threadForm.appendChild(threadInput);
+    threadForm.appendChild(threadSubmit);
+
+    threadSection.appendChild(threadHeader);
+    threadSection.appendChild(threadList);
+    threadSection.appendChild(threadForm);
+
     card.appendChild(header);
     card.appendChild(body);
     card.appendChild(actions);
+    card.appendChild(threadSection);
     postsList.appendChild(card);
+
+    void loadThreadsForPost(
+      String(post.id),
+      threadList,
+      threadEmpty,
+      threadCount,
+    );
+  }
+  updatePostListControls();
+}
+
+function updatePostListControls() {
+  const canInteract = firestoreReady && !!firebaseUser && hasSignedIn && isHolder;
+  const voteButtons = document.querySelectorAll("[data-post-vote]");
+  voteButtons.forEach((button) => {
+    (button as HTMLButtonElement).disabled = !canInteract;
+  });
+  const threadInputs = document.querySelectorAll("[data-thread-input]");
+  threadInputs.forEach((input) => {
+    (input as HTMLTextAreaElement).disabled = !canInteract;
+  });
+  const threadButtons = document.querySelectorAll("[data-thread-submit]");
+  threadButtons.forEach((button) => {
+    (button as HTMLButtonElement).disabled = !canInteract;
+  });
+}
+
+function renderThreads(
+  threads: Array<Record<string, unknown>>,
+  listEl: HTMLElement,
+  emptyEl: HTMLElement,
+  countEl: HTMLElement,
+) {
+  listEl.innerHTML = "";
+  const totalFromData = Number(countEl.dataset.total ?? "");
+  const totalCount =
+    Number.isFinite(totalFromData) && totalFromData > 0
+      ? totalFromData
+      : threads.length;
+  if (!threads.length) {
+    emptyEl.textContent = "No replies yet.";
+    emptyEl.hidden = false;
+    listEl.appendChild(emptyEl);
+    countEl.textContent = "0 replies";
+    countEl.dataset.total = "0";
+    return;
+  }
+  emptyEl.hidden = true;
+  listEl.appendChild(emptyEl);
+  countEl.textContent = `${totalCount} replies`;
+  countEl.dataset.total = String(totalCount);
+
+  for (const thread of threads) {
+    const item = document.createElement("div");
+    item.className = "thread-item";
+
+    const meta = document.createElement("div");
+    meta.className = "thread-meta";
+    const author =
+      thread.displayName || thread.username || thread.fid || "Unknown";
+    meta.textContent = `${author} - ${formatPostDate(thread.createdAt)}`;
+
+    const body = document.createElement("p");
+    body.className = "thread-body";
+    body.textContent = String(thread.body || "");
+
+    item.appendChild(meta);
+    item.appendChild(body);
+    listEl.appendChild(item);
+  }
+}
+
+async function loadThreadsForPost(
+  postId: string,
+  listEl: HTMLElement,
+  emptyEl: HTMLElement,
+  countEl: HTMLElement,
+) {
+  if (!firestoreDb) {
+    return;
+  }
+  try {
+    const threadsRef = collection(firestoreDb, "posts", postId, "threads");
+    const q = query(threadsRef, orderBy("createdAt", "asc"), limit(THREADS_LIMIT));
+    const snapshot = await getDocs(q);
+    const threads = snapshot.docs.map((docSnap: any) => ({
+      id: docSnap.id,
+      ...docSnap.data(),
+    }));
+    renderThreads(threads, listEl, emptyEl, countEl);
+  } catch (err) {
+    logError("Threads: load", err);
+    emptyEl.textContent = "Unable to load replies.";
+    emptyEl.hidden = false;
+    listEl.innerHTML = "";
+    listEl.appendChild(emptyEl);
+  }
+}
+
+async function createThreadReply(
+  postId: string,
+  input: HTMLTextAreaElement,
+  button: HTMLButtonElement,
+  listEl: HTMLElement,
+  emptyEl: HTMLElement,
+  countEl: HTMLElement,
+) {
+  if (!firestoreDb) {
+    setPostsStatus("warn", "Firestore is not configured yet.");
+    return;
+  }
+  if (!firebaseUser) {
+    setPostsStatus("warn", "Firebase auth not ready yet.");
+    return;
+  }
+  const uid = firebaseUser.uid;
+  if (!hasSignedIn) {
+    setPostsStatus("warn", "Sign in to reply.");
+    return;
+  }
+  if (!isHolder) {
+    setPostsStatus("warn", "Only holders can reply.");
+    return;
+  }
+  if (!fid) {
+    setPostsStatus("warn", "Unable to determine your Farcaster ID.");
+    return;
+  }
+  const body = input.value.trim();
+  if (!body) {
+    setPostsStatus("warn", "Write a reply before posting.");
+    return;
+  }
+  if (body.length > THREAD_BODY_MAX) {
+    setPostsStatus("warn", "Reply is too long.");
+    return;
+  }
+
+  setBusy(button, true);
+  setPostsStatus("idle", "Posting reply...");
+  try {
+    const threadsRef = collection(firestoreDb, "posts", postId, "threads");
+    const threadDoc = doc(threadsRef);
+    const postRef = doc(firestoreDb, "posts", postId);
+    await runTransaction(firestoreDb, async (tx: any) => {
+      tx.set(threadDoc, {
+        body,
+        fid,
+        uid,
+        username: userProfile?.username || undefined,
+        displayName: userProfile?.displayName || undefined,
+        createdAt: serverTimestamp(),
+      });
+      tx.update(postRef, {
+        threadCount: increment(1),
+      });
+    });
+    input.value = "";
+    setPostsStatus("ok", "Reply posted.");
+    await loadThreadsForPost(postId, listEl, emptyEl, countEl);
+    const currentTotal = Number(countEl.dataset.total ?? "0");
+    const nextTotal = Number.isFinite(currentTotal) ? currentTotal + 1 : 1;
+    countEl.dataset.total = String(nextTotal);
+    countEl.textContent = `${nextTotal} replies`;
+  } catch (err) {
+    logError("Threads: create", err);
+    setPostsStatus("error", "Unable to post reply.");
+  } finally {
+    setBusy(button, false);
   }
 }
 
@@ -578,7 +818,7 @@ async function createPost() {
     setPostsStatus("warn", "Add a title and description.");
     return;
   }
-  if (title.length > 120 || body.length > 1200) {
+  if (title.length > POST_TITLE_MAX || body.length > POST_BODY_MAX) {
     setPostsStatus("warn", "Post is too long.");
     return;
   }
@@ -596,6 +836,7 @@ async function createPost() {
       uid,
       createdAt: serverTimestamp(),
       voteCount: 0,
+      threadCount: 0,
     });
     postTitle.value = "";
     postBody.value = "";

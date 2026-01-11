@@ -9,7 +9,7 @@ mainnet to gate DAO voting and initiative submissions to holders.
 - Signs in with Farcaster Quick Auth and verifies the JWT via `/api/verify`.
 - Checks Farcaster-verified addresses via Base RPC to confirm ownership.
 - Automatically connects the Farcaster wallet provider (when available) to check the connected wallet.
-- Provides the foundation for holder-only votes and initiative proposals.
+- Provides holder-only proposals, votes, and thread replies via Firestore.
 
 ## Structure
 
@@ -35,9 +35,9 @@ on Deno Deploy. No local hosting is required.
 Optional: set `NEYNAR_API_KEY` (and `NEYNAR_API_BASE` if needed) to enrich the  
 auth response with Farcaster profile data and verified addresses.
 
-## Firestore setup (posts + votes)
+## Firestore setup (posts + threads + votes)
 
-The Mini App can store posts and votes in Firestore. Add your Firebase web      
+The Mini App can store posts, thread replies, and votes in Firestore. Add your Firebase web      
 config to `public/index.html`:
 
 - `data-firebase-api-key`
