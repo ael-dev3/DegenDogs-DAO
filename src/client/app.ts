@@ -107,6 +107,7 @@ let firestoreInitInProgress = false;
 let firebaseAuth: any = null;
 let firebaseUser: { uid: string } | null = null;
 let firebaseAuthReady = false;
+let firebaseAuthPending = false;
 let firebaseAuthError = false;
 
 function byId(id: string): HTMLElement {
@@ -393,6 +394,10 @@ function updatePostFormState() {
     setPostsStatus("error", "Firebase auth failed to initialize.");
     return;
   }
+  if (firebaseAuthPending) {
+    setPostsStatus("idle", "Connecting to Firebase...");
+    return;
+  }
   if (!firebaseUser) {
     const message = firebaseAuthReady
       ? "Firebase auth not ready. Enable anonymous auth in Firebase."
@@ -661,6 +666,8 @@ async function initFirebaseAuth(app: unknown) {
   try {
     firebaseAuth = getAuth(app);
     firebaseAuthReady = true;
+    firebaseAuthPending = true;
+    updatePostFormState();
     onAuthStateChanged(firebaseAuth, (user: any) => {
       firebaseUser = user ? { uid: user.uid } : null;
       updatePostFormState();
@@ -675,6 +682,9 @@ async function initFirebaseAuth(app: unknown) {
     firebaseAuthError = true;
     logError("Firebase auth", err);
     setPostsStatus("error", "Firebase auth failed to initialize.");
+    updatePostFormState();
+  } finally {
+    firebaseAuthPending = false;
     updatePostFormState();
   }
   return firebaseAuth;

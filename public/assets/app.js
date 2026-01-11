@@ -67,6 +67,7 @@ let firestoreInitInProgress = false;
 let firebaseAuth = null;
 let firebaseUser = null;
 let firebaseAuthReady = false;
+let firebaseAuthPending = false;
 let firebaseAuthError = false;
 function byId(id) {
     const el = document.getElementById(id);
@@ -309,6 +310,10 @@ function updatePostFormState() {
     postsPanel.dataset.state = canWrite ? "ready" : "readonly";
     if (firebaseAuthError) {
         setPostsStatus("error", "Firebase auth failed to initialize.");
+        return;
+    }
+    if (firebaseAuthPending) {
+        setPostsStatus("idle", "Connecting to Firebase...");
         return;
     }
     if (!firebaseUser) {
@@ -555,6 +560,8 @@ async function initFirebaseAuth(app) {
     try {
         firebaseAuth = getAuth(app);
         firebaseAuthReady = true;
+        firebaseAuthPending = true;
+        updatePostFormState();
         onAuthStateChanged(firebaseAuth, (user) => {
             firebaseUser = user ? { uid: user.uid } : null;
             updatePostFormState();
@@ -571,6 +578,10 @@ async function initFirebaseAuth(app) {
         firebaseAuthError = true;
         logError("Firebase auth", err);
         setPostsStatus("error", "Firebase auth failed to initialize.");
+        updatePostFormState();
+    }
+    finally {
+        firebaseAuthPending = false;
         updatePostFormState();
     }
     return firebaseAuth;
