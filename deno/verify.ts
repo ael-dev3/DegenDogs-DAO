@@ -95,58 +95,34 @@ async function fetchNeynarUser(fid: number) {
 }
 
 Deno.serve(async (req) => {
-  const origin = req.headers.get("origin") || "";
-  const url = new URL(req.url);
-
-  if (req.method === "OPTIONS") {
-    return new Response("", { status: 204, headers: corsHeaders(origin) });
-  }
-
-  if (url.pathname !== "/api/verify") {
-    return new Response("Not found", {
-      status: 404,
-      headers: corsHeaders(origin),
-    });
-  }
-
-  if (req.method !== "GET" && req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "method_not_allowed" }), {
-      status: 405,
-      headers: {
-        ...corsHeaders(origin),
-        "content-type": "application/json; charset=utf-8",
-      },
-    });
-  }
-
-  const token = await readToken(req);
-  if (!token) {
-    return new Response(JSON.stringify({ error: "missing_token" }), {
-      status: 400,
-      headers: {
-        ...corsHeaders(origin),
-        "content-type": "application/json; charset=utf-8",
-      },
-    });
-  }
-
-  const domain = appDomain || hostFromHeaders(req.headers);
-  if (!domain) {
-    return new Response(JSON.stringify({ error: "missing_domain" }), {
-      status: 500,
-      headers: {
-        ...corsHeaders(origin),
-        "content-type": "application/json; charset=utf-8",
-      },
-    });
-  }
-
   try {
-    const payload = await client.verifyJwt({ token, domain });
-    const fid =
-      typeof payload.sub === "string" ? Number(payload.sub) : payload.sub;
-    if (!Number.isFinite(fid)) {
-      return new Response(JSON.stringify({ error: "invalid_fid" }), {
+    const origin = req.headers.get("origin") || "";
+    const url = new URL(req.url);
+
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+
+    if (url.pathname !== "/api/verify") {
+      return new Response("Not found", {
+        status: 404,
+        headers: corsHeaders(origin),
+      });
+    }
+
+    if (req.method !== "GET" && req.method !== "POST") {
+      return new Response(JSON.stringify({ error: "method_not_allowed" }), {
+        status: 405,
+        headers: {
+          ...corsHeaders(origin),
+          "content-type": "application/json; charset=utf-8",
+        },
+      });
+    }
+
+    const token = await readToken(req);
+    if (!token) {
+      return new Response(JSON.stringify({ error: "missing_token" }), {
         status: 400,
         headers: {
           ...corsHeaders(origin),
@@ -155,71 +131,107 @@ Deno.serve(async (req) => {
       });
     }
 
-    let user: Record<string, unknown> | null = null;
-    if (neynarApiKey) {
-      try {
-        user = await fetchNeynarUser(fid);
-      } catch (err) {
-        console.error("Neynar lookup failed:", err);
-      }
-    }
-
-    const verifiedSet = new Set<string>();
-    const verifiedEth =
-      (user?.verified_addresses as { eth_addresses?: string[] } | undefined)
-        ?.eth_addresses ?? [];
-    const verifications = Array.isArray(user?.verifications)
-      ? (user?.verifications as string[])
-      : [];
-    const custodyAddress =
-      typeof user?.custody_address === "string" ? user.custody_address : undefined;
-
-    for (const addr of verifiedEth) {
-      verifiedSet.add(addr);
-    }
-    for (const addr of verifications) {
-      verifiedSet.add(addr);
-    }
-    if (custodyAddress) {
-      verifiedSet.add(custodyAddress);
-    }
-
-    return new Response(
-      JSON.stringify({
-        fid,
-        issuedAt: payload.iat,
-        expiresAt: payload.exp,
-        username: (user?.username as string | undefined) ?? undefined,
-        displayName:
-          (user?.display_name as string | undefined) ??
-          (user?.displayName as string | undefined) ??
-          undefined,
-        custodyAddress,
-        verifiedEthAddresses: Array.from(verifiedSet),
-      }),
-      {
-        status: 200,
-        headers: {
-          ...corsHeaders(origin),
-          "content-type": "application/json; charset=utf-8",
-        },
-      },
-    );
-  } catch (err) {
-    if (err instanceof Errors.InvalidTokenError) {
-      return new Response(JSON.stringify({ error: "invalid_token" }), {
-        status: 401,
+    const domain = appDomain || hostFromHeaders(req.headers);
+    if (!domain) {
+      return new Response(JSON.stringify({ error: "missing_domain" }), {
+        status: 500,
         headers: {
           ...corsHeaders(origin),
           "content-type": "application/json; charset=utf-8",
         },
       });
     }
-    console.error("Verification failed:", err);
-    return new Response(JSON.stringify({ error: "verification_failed" }), {
+
+    try {
+      const payload = await client.verifyJwt({ token, domain });
+      const fid =
+        typeof payload.sub === "string" ? Number(payload.sub) : payload.sub;
+      if (!Number.isFinite(fid)) {
+        return new Response(JSON.stringify({ error: "invalid_fid" }), {
+          status: 400,
+          headers: {
+            ...corsHeaders(origin),
+            "content-type": "application/json; charset=utf-8",
+          },
+        });
+      }
+
+      let user: Record<string, unknown> | null = null;
+      if (neynarApiKey) {
+        try {
+          user = await fetchNeynarUser(fid);
+        } catch (err) {
+          console.error("Neynar lookup failed:", err);
+        }
+      }
+
+      const verifiedSet = new Set<string>();
+      const verifiedEth =
+        (user?.verified_addresses as { eth_addresses?: string[] } | undefined)
+          ?.eth_addresses ?? [];
+      const verifications = Array.isArray(user?.verifications)
+        ? (user?.verifications as string[])
+        : [];
+      const custodyAddress =
+        typeof user?.custody_address === "string"
+          ? user.custody_address
+          : undefined;
+
+      for (const addr of verifiedEth) {
+        verifiedSet.add(addr);
+      }
+      for (const addr of verifications) {
+        verifiedSet.add(addr);
+      }
+      if (custodyAddress) {
+        verifiedSet.add(custodyAddress);
+      }
+
+      return new Response(
+        JSON.stringify({
+          fid,
+          issuedAt: payload.iat,
+          expiresAt: payload.exp,
+          username: (user?.username as string | undefined) ?? undefined,
+          displayName:
+            (user?.display_name as string | undefined) ??
+            (user?.displayName as string | undefined) ??
+            undefined,
+          custodyAddress,
+          verifiedEthAddresses: Array.from(verifiedSet),
+        }),
+        {
+          status: 200,
+          headers: {
+            ...corsHeaders(origin),
+            "content-type": "application/json; charset=utf-8",
+          },
+        },
+      );
+    } catch (err) {
+      if (err instanceof Errors.InvalidTokenError) {
+        return new Response(JSON.stringify({ error: "invalid_token" }), {
+          status: 401,
+          headers: {
+            ...corsHeaders(origin),
+            "content-type": "application/json; charset=utf-8",
+          },
+        });
+      }
+      console.error("Verification failed:", err);
+      return new Response(JSON.stringify({ error: "verification_failed" }), {
+        status: 500,
+        headers: {
+          ...corsHeaders(origin),
+          "content-type": "application/json; charset=utf-8",
+        },
+      });
+    }
+  } catch (err) {
+    console.error("Unhandled request error:", err);
+    return new Response(JSON.stringify({ error: "unhandled_error" }), {
       status: 500,
       headers: {
-        ...corsHeaders(origin),
         "content-type": "application/json; charset=utf-8",
       },
     });
