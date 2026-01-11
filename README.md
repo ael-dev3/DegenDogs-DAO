@@ -33,8 +33,27 @@ mainnet to gate DAO voting and initiative submissions to holders.
 If the API is hosted on a different origin, set `data-api-origin` in
 `public/index.html` to that origin.
 
-Optional: set `NEYNAR_API_KEY` (and `NEYNAR_API_BASE` if needed) to enrich the
+Optional: set `NEYNAR_API_KEY` (and `NEYNAR_API_BASE` if needed) to enrich the  
 auth response with Farcaster profile data and verified addresses.
+
+## Firestore setup (posts + votes)
+
+The Mini App can store posts and votes in Firestore. Add your Firebase web
+config to `public/index.html`:
+
+- `data-firebase-api-key`
+- `data-firebase-auth-domain`
+- `data-firebase-project-id`
+- `data-firebase-app-id`
+- Optional: `data-firebase-messaging-sender-id`, `data-firebase-storage-bucket`
+
+To apply the sample rules in `firestore.rules`, run:
+
+`firebase deploy --only firestore`
+
+The Spark plan should be enough for a small community.
+
+Note: the sample rules are open and should be tightened before production.
 
 ## Deno Deploy verifier
 

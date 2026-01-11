@@ -7,9 +7,18 @@
     <link rel="preconnect" href="https://auth.farcaster.xyz">
     <link rel="icon" href="/dog.png">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="/assets/styles.css?v=20260111-10">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260111-12">
   </head>
-  <body data-api-origin="https://degendogs-dao.ael-dev3.deno.net" data-app-version="20260111-10">
+  <body
+    data-api-origin="https://degendogs-dao.ael-dev3.deno.net"
+    data-app-version="20260111-12"
+    data-firebase-api-key=""
+    data-firebase-auth-domain=""
+    data-firebase-project-id="degendogs-dao"
+    data-firebase-app-id=""
+    data-firebase-messaging-sender-id=""
+    data-firebase-storage-bucket=""
+  >
     <main class="app">
       <header class="hero">
         <p class="eyebrow">Farcaster Mini App</p>
@@ -68,7 +77,34 @@
           <span>Base mainnet</span>
         </div>
       </section>
+      <section id="posts-panel" class="panel board" data-state="disabled">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">DAO posts</p>
+            <h2>Proposals &amp; threads</h2>
+            <p class="lede">Create holder-only posts and vote on what happens next.</p>
+          </div>
+          <button id="refresh-posts" type="button">Refresh</button>
+        </header>
+
+        <div id="posts-status" class="result" data-state="idle" role="status" aria-live="polite">Loading posts...</div>
+
+        <form id="post-form" class="post-form" autocomplete="off">
+          <label class="field">
+            <span>Title</span>
+            <input id="post-title" name="title" type="text" maxlength="120" placeholder="Proposal title" required>
+          </label>
+          <label class="field">
+            <span>Details</span>
+            <textarea id="post-body" name="body" rows="4" maxlength="1200" placeholder="Describe the proposal or thread starter." required></textarea>
+          </label>
+          <button id="post-submit" class="primary" type="submit">Post</button>
+        </form>
+
+        <div id="posts-empty" class="empty" hidden>No posts yet.</div>
+        <div id="posts-list" class="posts"></div>
+      </section>
     </main>
-    <script type="module" src="/assets/app.js?v=20260111-10"></script>
+    <script type="module" src="/assets/app.js?v=20260111-12"></script>
   </body>
 </html>

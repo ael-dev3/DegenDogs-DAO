@@ -1,4 +1,6 @@
 import { sdk } from "https://esm.sh/@farcaster/miniapp-sdk";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+import { addDoc, collection, doc, getDocs, getFirestore, increment, limit, orderBy, query, runTransaction, serverTimestamp, } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore.js";
 const CONTRACT = "0x09154248fFDbaF8aA877aE8A4bf8cE1503596428";
 const BASE_CHAIN_ID = "0x2105";
 const BASE_CHAIN_PARAMS = {
@@ -30,6 +32,15 @@ const authButton = byId("auth-btn");
 const authButtonLabel = authButton.textContent?.trim() || "Sign in & verify";
 const walletButton = byId("wallet-btn");
 const walletButtonLabel = walletButton.textContent?.trim() || "Connect wallet";
+const postsPanel = byId("posts-panel");
+const postsStatus = byId("posts-status");
+const postsList = byId("posts-list");
+const postsEmpty = byId("posts-empty");
+const postForm = byId("post-form");
+const postTitle = byId("post-title");
+const postBody = byId("post-body");
+const postSubmit = byId("post-submit");
+const refreshPostsButton = byId("refresh-posts");
 const debugPanel = document.getElementById("debug-panel");
 const debugLog = document.getElementById("debug-log");
 const debugApi = document.getElementById("debug-api");
@@ -39,6 +50,7 @@ const debugLines = [];
 let provider = null;
 let address = null;
 let fid = null;
+let userProfile = null;
 let verifiedAddresses = [];
 let hasSignedIn = false;
 let sdkReady = false;
@@ -46,6 +58,10 @@ let isMiniApp = false;
 let supportsWallet = false;
 let signInInProgress = false;
 let profileHoldings = null;
+let walletHoldings = null;
+let isHolder = false;
+let firestoreDb = null;
+let firestoreReady = false;
 function byId(id) {
     const el = document.getElementById(id);
     if (!el) {
@@ -201,6 +217,267 @@ function profileSummaryForWalletResult(summary) {
     }
     return `No Degen Dogs found across ${summary.checked} verified ${walletLabel}.${failureNote}`;
 }
+function getFirebaseConfig() {
+    const globalConfig = window.FIREBASE_CONFIG;
+    if (globalConfig && typeof globalConfig === "object") {
+        return globalConfig;
+    }
+    const dataset = document.body.dataset;
+    const apiKey = (dataset.firebaseApiKey || "").trim();
+    const authDomain = (dataset.firebaseAuthDomain || "").trim();
+    const projectId = (dataset.firebaseProjectId || "").trim();
+    const appId = (dataset.firebaseAppId || "").trim();
+    const messagingSenderId = (dataset.firebaseMessagingSenderId || "").trim();
+    const storageBucket = (dataset.firebaseStorageBucket || "").trim();
+    if (!apiKey || !authDomain || !projectId || !appId) {
+        return null;
+    }
+    return {
+        apiKey,
+        authDomain,
+        projectId,
+        appId,
+        messagingSenderId: messagingSenderId || undefined,
+        storageBucket: storageBucket || undefined,
+    };
+}
+function setPostsStatus(state, text) {
+    postsStatus.dataset.state = state;
+    postsStatus.textContent = text;
+}
+function updateHolderState() {
+    const profileTotal = profileHoldings?.total ?? 0n;
+    const walletTotal = walletHoldings ?? 0n;
+    isHolder = profileTotal > 0n || walletTotal > 0n;
+    updatePostFormState();
+}
+function updatePostFormState() {
+    const canWrite = firestoreReady && hasSignedIn && isHolder;
+    postSubmit.disabled = !canWrite;
+    postTitle.disabled = !firestoreReady;
+    postBody.disabled = !firestoreReady;
+    refreshPostsButton.disabled = !firestoreReady;
+    if (!firestoreReady) {
+        setPostsStatus("warn", "Firestore is not configured yet.");
+        postsPanel.dataset.state = "disabled";
+        return;
+    }
+    postsPanel.dataset.state = canWrite ? "ready" : "readonly";
+    if (!hasSignedIn) {
+        setPostsStatus("warn", "Sign in to create posts and vote.");
+        return;
+    }
+    if (!isHolder) {
+        setPostsStatus("warn", "Only Degen Dogs holders can create posts or vote.");
+        return;
+    }
+    setPostsStatus("ok", "Ready to post and vote.");
+}
+function formatPostDate(value) {
+    if (!value) {
+        return "Just now";
+    }
+    const asAny = value;
+    if (typeof asAny.toDate === "function") {
+        return asAny.toDate().toLocaleString();
+    }
+    if (value instanceof Date) {
+        return value.toLocaleString();
+    }
+    if (typeof value === "string") {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toLocaleString();
+        }
+    }
+    return "Just now";
+}
+function renderPosts(posts) {
+    postsList.innerHTML = "";
+    if (!posts.length) {
+        postsEmpty.hidden = false;
+        return;
+    }
+    postsEmpty.hidden = true;
+    for (const post of posts) {
+        const card = document.createElement("article");
+        card.className = "post-card";
+        const header = document.createElement("div");
+        header.className = "post-header";
+        const title = document.createElement("h3");
+        title.textContent = String(post.title || "Untitled");
+        const meta = document.createElement("div");
+        meta.className = "post-meta";
+        const author = post.displayName || post.username || post.fid || "Unknown";
+        meta.textContent = `${author} - ${formatPostDate(post.createdAt)}`;
+        header.appendChild(title);
+        header.appendChild(meta);
+        const body = document.createElement("p");
+        body.className = "post-body";
+        body.textContent = String(post.body || "");
+        const actions = document.createElement("div");
+        actions.className = "post-actions";
+        const voteButton = document.createElement("button");
+        voteButton.type = "button";
+        voteButton.textContent = "Vote";
+        voteButton.disabled = !firestoreReady || !hasSignedIn || !isHolder;
+        const voteCount = document.createElement("span");
+        voteCount.className = "vote-count";
+        const countValue = typeof post.voteCount === "number" ? post.voteCount : 0;
+        voteCount.textContent = `${countValue} votes`;
+        voteButton.addEventListener("click", () => {
+            void voteOnPost(String(post.id), voteButton, voteCount);
+        });
+        actions.appendChild(voteButton);
+        actions.appendChild(voteCount);
+        card.appendChild(header);
+        card.appendChild(body);
+        card.appendChild(actions);
+        postsList.appendChild(card);
+    }
+}
+async function loadPosts() {
+    if (!firestoreDb) {
+        return;
+    }
+    setPostsStatus("idle", "Loading posts...");
+    try {
+        const postsRef = collection(firestoreDb, "posts");
+        const q = query(postsRef, orderBy("createdAt", "desc"), limit(25));
+        const snapshot = await getDocs(q);
+        const posts = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+        }));
+        renderPosts(posts);
+        if (!posts.length) {
+            setPostsStatus("idle", "No posts yet. Create the first one.");
+        }
+    }
+    catch (err) {
+        logError("Posts: load", err);
+        setPostsStatus("error", "Unable to load posts right now.");
+    }
+}
+async function createPost() {
+    if (!firestoreDb) {
+        setPostsStatus("warn", "Firestore is not configured yet.");
+        return;
+    }
+    if (!hasSignedIn) {
+        setPostsStatus("warn", "Sign in to create a post.");
+        return;
+    }
+    if (!isHolder) {
+        setPostsStatus("warn", "Only holders can create posts.");
+        return;
+    }
+    if (!fid) {
+        setPostsStatus("warn", "Unable to determine your Farcaster ID.");
+        return;
+    }
+    const title = postTitle.value.trim();
+    const body = postBody.value.trim();
+    if (!title || !body) {
+        setPostsStatus("warn", "Add a title and description.");
+        return;
+    }
+    if (title.length > 120 || body.length > 1200) {
+        setPostsStatus("warn", "Post is too long.");
+        return;
+    }
+    setBusy(postSubmit, true);
+    setPostsStatus("idle", "Posting...");
+    try {
+        const postsRef = collection(firestoreDb, "posts");
+        await addDoc(postsRef, {
+            title,
+            body,
+            fid,
+            username: userProfile?.username || undefined,
+            displayName: userProfile?.displayName || undefined,
+            createdAt: serverTimestamp(),
+            voteCount: 0,
+        });
+        postTitle.value = "";
+        postBody.value = "";
+        setPostsStatus("ok", "Post created.");
+        await loadPosts();
+    }
+    catch (err) {
+        logError("Posts: create", err);
+        setPostsStatus("error", "Unable to create post.");
+    }
+    finally {
+        setBusy(postSubmit, false);
+    }
+}
+async function voteOnPost(postId, button, countEl) {
+    if (!firestoreDb || !fid || !hasSignedIn) {
+        setPostsStatus("warn", "Sign in to vote.");
+        return;
+    }
+    if (!isHolder) {
+        setPostsStatus("warn", "Only holders can vote.");
+        return;
+    }
+    button.disabled = true;
+    try {
+        let didVote = false;
+        await runTransaction(firestoreDb, async (tx) => {
+            const postRef = doc(firestoreDb, "posts", postId);
+            const voteRef = doc(firestoreDb, "posts", postId, "votes", String(fid));
+            const voteSnap = await tx.get(voteRef);
+            if (voteSnap.exists()) {
+                return;
+            }
+            tx.set(voteRef, {
+                fid,
+                createdAt: serverTimestamp(),
+            });
+            tx.update(postRef, {
+                voteCount: increment(1),
+            });
+            didVote = true;
+        });
+        if (didVote) {
+            const current = Number(countEl.textContent?.split(" ")[0] || 0);
+            countEl.textContent = `${current + 1} votes`;
+            setPostsStatus("ok", "Vote recorded.");
+        }
+        else {
+            setPostsStatus("warn", "You already voted on this post.");
+        }
+    }
+    catch (err) {
+        logError("Posts: vote", err);
+        setPostsStatus("error", "Unable to record vote.");
+        button.disabled = false;
+    }
+}
+function initFirestore() {
+    if (firestoreDb) {
+        return firestoreDb;
+    }
+    const config = getFirebaseConfig();
+    if (!config) {
+        setPostsStatus("warn", "Firestore is not configured yet. Add Firebase config values.");
+        postsPanel.dataset.state = "disabled";
+        return null;
+    }
+    try {
+        const app = initializeApp(config);
+        firestoreDb = getFirestore(app);
+        firestoreReady = true;
+        updatePostFormState();
+        return firestoreDb;
+    }
+    catch (err) {
+        logError("Firestore init", err);
+        setPostsStatus("error", "Firestore failed to initialize.");
+        return null;
+    }
+}
 function encodeBalanceOf(addr) {
     const clean = addr.toLowerCase().replace("0x", "");
     if (clean.length !== 40) {
@@ -336,6 +613,7 @@ async function checkProfileHoldings() {
         setText(dogsStatus, "0");
         setResult("warn", "No verified addresses on your Farcaster profile. Connect a wallet to check holdings.");
         profileHoldings = { total: 0n, checked: 0, failed: 0 };
+        updateHolderState();
         return profileHoldings;
     }
     const results = await Promise.allSettled(addresses.map((address) => balanceOfAddress(address)));
@@ -359,6 +637,7 @@ async function checkProfileHoldings() {
         setText(dogsStatus, "Error");
         setResult("error", "Unable to check verified addresses right now.");
         profileHoldings = null;
+        updateHolderState();
         return { total, checked, failed };
     }
     setText(dogsStatus, total.toString());
@@ -373,6 +652,7 @@ async function checkProfileHoldings() {
         setResult("warn", `No Degen Dogs found across ${checked} verified ${walletLabel}.${failureNote}`);
     }
     profileHoldings = { total, checked, failed };
+    updateHolderState();
     return profileHoldings;
 }
 function formatErrorDetail(value) {
@@ -594,6 +874,10 @@ async function handleSignIn(options = {}) {
         }
         const data = parsed;
         fid = data.fid;
+        userProfile = {
+            username: data.username,
+            displayName: data.displayName,
+        };
         verifiedAddresses = Array.isArray(data.verifiedEthAddresses)
             ? data.verifiedEthAddresses
             : [];
@@ -649,6 +933,7 @@ async function handleSignIn(options = {}) {
         setBusy(authButton, false);
         setButtonLabel(authButton, hasSignedIn ? "Recheck profile" : authButtonLabel);
         signInInProgress = false;
+        updatePostFormState();
         if (auto && !signedIn) {
             logDebug("Auth: auto sign-in failed");
         }
@@ -745,6 +1030,8 @@ async function connectWalletAndCheck(options = {}) {
         const balance = parseHexToBigInt(result);
         setText(dogsStatus, balance.toString());
         logDebug("Wallet: balance", balance.toString());
+        walletHoldings = balance;
+        updateHolderState();
         const normalizedAddress = address.toLowerCase();
         const hasVerifiedMatch = verifiedAddresses.some((addr) => addr.toLowerCase() === normalizedAddress);
         const verificationNote = verifiedAddresses.length && !hasVerifiedMatch
@@ -786,6 +1073,13 @@ async function init() {
     });
     walletButton.addEventListener("click", handleWalletCheck);
     walletButton.disabled = true;
+    postForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        void createPost();
+    });
+    refreshPostsButton.addEventListener("click", () => {
+        void loadPosts();
+    });
     if (debugPanel) {
         debugPanel.hidden = !debugEnabled;
     }
@@ -816,40 +1110,44 @@ async function init() {
         sdkReady = false;
         supportsWallet = false;
         setResult("warn", "Not running inside a Farcaster host.");
-        return;
     }
-    try {
-        await sdk.actions.ready();
-        sdkReady = true;
-        logDebug("SDK ready");
+    else {
         try {
-            const capabilities = await sdk.getCapabilities();
-            supportsWallet = capabilities.includes("wallet.getEthereumProvider");
-            logDebug("SDK capabilities", {
-                supportsWallet,
-                count: capabilities.length,
-            });
-        }
-        catch (err) {
-            logError("SDK capabilities", err);
-            supportsWallet = false;
-        }
-        if (debugEnabled) {
+            await sdk.actions.ready();
+            sdkReady = true;
+            logDebug("SDK ready");
             try {
-                const context = await sdk.context;
-                logDebug("SDK context", context);
+                const capabilities = await sdk.getCapabilities();
+                supportsWallet = capabilities.includes("wallet.getEthereumProvider");
+                logDebug("SDK capabilities", {
+                    supportsWallet,
+                    count: capabilities.length,
+                });
             }
             catch (err) {
-                logError("SDK context", err);
+                logError("SDK capabilities", err);
+                supportsWallet = false;
             }
+            if (debugEnabled) {
+                try {
+                    const context = await sdk.context;
+                    logDebug("SDK context", context);
+                }
+                catch (err) {
+                    logError("SDK context", err);
+                }
+            }
+            void handleSignIn({ auto: true });
         }
-        void handleSignIn({ auto: true });
+        catch (err) {
+            sdkReady = false;
+            supportsWallet = false;
+            logError("SDK ready", err);
+            setResult("warn", "Not running inside a Farcaster host.");
+        }
     }
-    catch (err) {
-        sdkReady = false;
-        supportsWallet = false;
-        logError("SDK ready", err);
-        setResult("warn", "Not running inside a Farcaster host.");
-    }
+    initFirestore();
+    updatePostFormState();
+    void loadPosts();
 }
 init();

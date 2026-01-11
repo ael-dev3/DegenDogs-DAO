@@ -97,6 +97,18 @@ h1 {
   animation: rise 620ms ease-out both;
 }
 
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.panel-header h2 {
+  margin: 6px 0 0;
+  font-size: 20px;
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -139,6 +151,97 @@ h1 {
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.4;
+  color: var(--muted);
+}
+
+.post-form {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.field input,
+.field textarea {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0f1612;
+  color: var(--ink);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: "Space Grotesk", "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.field input:focus-visible,
+.field textarea:focus-visible {
+  outline: 2px solid rgba(72, 211, 146, 0.7);
+  outline-offset: 2px;
+}
+
+.posts {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.post-card {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #0f1612;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.post-header {
+  display: grid;
+  gap: 6px;
+}
+
+.post-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.post-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.post-body {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.post-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.vote-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.empty {
+  margin-top: 16px;
+  font-size: 13px;
   color: var(--muted);
 }
 
