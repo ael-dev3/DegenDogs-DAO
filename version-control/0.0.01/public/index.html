@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Degen Dogs DAO</title>
+    <link rel="preconnect" href="https://auth.farcaster.xyz">
+    <link rel="icon" href="/dog.png">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260111-10">
+  </head>
+  <body data-api-origin="https://degendogs-dao.ael-dev3.deno.net" data-app-version="20260111-10">
+    <main class="app">
+      <header class="hero">
+        <p class="eyebrow">Farcaster Mini App</p>
+        <h1>Degen Dogs DAO</h1>
+        <p class="lede">Sign in with Farcaster to verify holder status on Base.</p>
+      </header>
+
+      <section class="panel">
+        <div class="status-grid">
+          <div class="status" style="--delay: 0ms">
+            <span class="label">Auth</span>
+            <span id="auth-status" class="value">Not signed in</span>
+          </div>
+          <div class="status" style="--delay: 80ms">
+            <span class="label">Wallet</span>
+            <span id="wallet-status" class="value">Not connected</span>
+          </div>
+          <div class="status" style="--delay: 160ms">
+            <span class="label">Chain</span>
+            <span id="chain-status" class="value">Unknown</span>
+          </div>
+          <div class="status" style="--delay: 240ms">
+            <span class="label">Dogs</span>
+            <span id="dogs-status" class="value">Unchecked</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="auth-btn" class="primary" type="button">Sign in &amp; verify</button>
+          <button id="wallet-btn" type="button" disabled>Connect wallet</button>
+        </div>
+
+        <p class="hint">We verify Farcaster addresses first, then auto-check your connected wallet when available. Tap Connect wallet if needed.</p>
+
+        <div id="result" class="result" data-state="idle" role="status" aria-live="polite">Ready to sign in and verify your holdings.</div>
+
+        <div id="debug-panel" class="debug" hidden>
+          <div class="debug-row">
+            <span class="label">API base</span>
+            <span id="debug-api" class="value"></span>
+          </div>
+          <div class="debug-row">
+            <span class="label">Debug</span>
+            <span id="debug-mode" class="value"></span>
+          </div>
+          <div class="debug-row">
+            <span class="label">Version</span>
+            <span id="debug-version" class="value"></span>
+          </div>
+          <pre id="debug-log" class="debug-log" aria-live="polite"></pre>
+        </div>
+
+        <div class="foot">
+          <span>Contract</span>
+          <a href="https://basescan.org/address/0x09154248fFDbaF8aA877aE8A4bf8cE1503596428" target="_blank" rel="noreferrer">0x0915...6428</a>
+          <span>Base mainnet</span>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/assets/app.js?v=20260111-10"></script>
+  </body>
+</html>

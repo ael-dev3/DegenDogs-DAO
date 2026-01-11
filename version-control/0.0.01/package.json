@@ -1,0 +1,12 @@
+{
+  "name": "degendogs-miniapp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:client": "tsc -p tsconfig.client.json",
+    "build": "npm run build:client"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  }
+}
