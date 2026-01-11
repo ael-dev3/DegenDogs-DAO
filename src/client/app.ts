@@ -67,6 +67,7 @@ let hasSignedIn = false;
 let sdkReady = false;
 let isMiniApp = false;
 let supportsWallet = false;
+let signInInProgress = false;
 let profileHoldings: { total: bigint; checked: number; failed: number } | null =
   null;
 
@@ -571,6 +572,10 @@ type WalletCheckOptions = {
   silent?: boolean;
 };
 
+type SignInOptions = {
+  auto?: boolean;
+};
+
 type AuthAttempt = {
   res: Response;
   bodyText: string;
@@ -647,7 +652,12 @@ async function debugProbe() {
   }
 }
 
-async function handleSignIn() {
+async function handleSignIn(options: SignInOptions = {}) {
+  if (signInInProgress) {
+    return false;
+  }
+  signInInProgress = true;
+  const { auto = false } = options;
   setBusy(authButton, true);
   setButtonLabel(authButton, "Signing in...");
   setResult("idle", "Requesting Farcaster sign in...");
@@ -760,11 +770,18 @@ async function handleSignIn() {
     setBusy(walletButton, false);
     walletButton.disabled = true;
     setButtonLabel(walletButton, walletButtonLabel);
+  } finally {
+    hasSignedIn = signedIn;
+    setBusy(authButton, false);
+    setButtonLabel(
+      authButton,
+      hasSignedIn ? "Recheck profile" : authButtonLabel,
+    );
+    signInInProgress = false;
+    if (auto && !signedIn) {
+      logDebug("Auth: auto sign-in failed");
+    }
   }
-
-  hasSignedIn = signedIn;
-  setBusy(authButton, false);
-  setButtonLabel(authButton, hasSignedIn ? "Recheck profile" : authButtonLabel);
   return signedIn;
 }
 
@@ -921,7 +938,9 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
 }
 
 async function init() {
-  authButton.addEventListener("click", handleSignIn);
+  authButton.addEventListener("click", () => {
+    void handleSignIn({ auto: false });
+  });
   walletButton.addEventListener("click", handleWalletCheck);
   walletButton.disabled = true;
   if (debugPanel) {
@@ -985,6 +1004,8 @@ async function init() {
         logError("SDK context", err);
       }
     }
+
+    void handleSignIn({ auto: true });
   } catch (err) {
     sdkReady = false;
     supportsWallet = false;
