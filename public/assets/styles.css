@@ -194,6 +194,7 @@ button:disabled {
   background: #0d1411;
   font-size: 14px;
   color: var(--ink);
+  white-space: pre-wrap;
 }
 
 .debug {

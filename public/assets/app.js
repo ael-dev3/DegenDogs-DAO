@@ -14,6 +14,7 @@ const apiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
 const apiOrigin = (apiOriginOverride || document.body.dataset.apiOrigin || "")
     .trim();
 const apiBase = resolveApiBase(apiOrigin || window.location.origin);
+const apiVerifyUrl = `${apiBase}/api/verify`;
 const authStatus = byId("auth-status");
 const walletStatus = byId("wallet-status");
 const chainStatus = byId("chain-status");
@@ -104,6 +105,26 @@ function logError(context, err) {
     if (err instanceof Error && err.stack) {
         logDebug(`${context} stack`, truncate(err.stack, 1200));
     }
+}
+function apiConfigLines() {
+    return [
+        `URL: ${apiVerifyUrl}`,
+        `data-api-origin: ${apiOrigin || "(empty)"}`,
+        `window.origin: ${window.location.origin}`,
+    ];
+}
+function authEndpointErrorMessage(status, bodyText) {
+    const lines = [`Auth endpoint not found (HTTP ${status}).`];
+    if (debugEnabled) {
+        lines.push(...apiConfigLines());
+        if (bodyText) {
+            lines.push(`body: ${truncate(bodyText, 260)}`);
+        }
+    }
+    else {
+        lines.push("Add ?debug=1 for details.");
+    }
+    return lines.join("\n");
 }
 function formatAddress(value) {
     if (!value || value.length < 10) {
@@ -207,8 +228,8 @@ async function handleSignIn() {
     let signedIn = false;
     try {
         // Quick Auth triggers Farcaster sign-in if needed.
-        logDebug("Auth: quickAuth.fetch", `${apiBase}/api/verify`);
-        const res = await sdk.quickAuth.fetch(`${apiBase}/api/verify`);
+        logDebug("Auth: quickAuth.fetch", apiVerifyUrl);
+        const res = await sdk.quickAuth.fetch(apiVerifyUrl);
         logDebug("Auth: response", `${res.status} ${res.statusText}`);
         const traceId = res.headers.get("x-deno-trace-id");
         if (traceId) {
@@ -226,7 +247,7 @@ async function handleSignIn() {
         }
         if (!res.ok) {
             if (res.status === 404 || res.status === 405) {
-                throw new Error("Auth endpoint not found. Deploy the verifier and set data-api-origin.");
+                throw new Error(authEndpointErrorMessage(res.status, bodyText));
             }
             const detail = parsed && "error" in parsed && parsed.error
                 ? parsed.error
