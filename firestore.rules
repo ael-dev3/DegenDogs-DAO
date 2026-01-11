@@ -17,7 +17,8 @@ service cloud.firestore {
         "username",
         "displayName",
         "createdAt",
-        "voteCount",
+        "approvePower",
+        "denyPower",
         "threadCount",
         "uid"
       ]) &&
@@ -28,8 +29,10 @@ service cloud.firestore {
       data.body.size() > 0 &&
       data.body.size() <= 1200 &&
       data.fid is int &&
-      isNumber(data.voteCount) &&
-      data.voteCount >= 0 &&
+      isNumber(data.approvePower) &&
+      data.approvePower >= 0 &&
+      isNumber(data.denyPower) &&
+      data.denyPower >= 0 &&
       isNumber(data.threadCount) &&
       data.threadCount >= 0 &&
       data.uid == request.auth.uid &&
@@ -38,24 +41,34 @@ service cloud.firestore {
       (!("displayName" in data) || data.displayName is string);
     }
 
-    function baseVoteCount() {
-      return isNumber(resource.data.voteCount) ? resource.data.voteCount : 0;
+    function baseApprovePower() {
+      return isNumber(resource.data.approvePower) ? resource.data.approvePower : 0;
+    }
+
+    function baseDenyPower() {
+      return isNumber(resource.data.denyPower) ? resource.data.denyPower : 0;
     }
 
     function baseThreadCount() {
       return isNumber(resource.data.threadCount) ? resource.data.threadCount : 0;
     }
 
-    function isVoteIncrement() {
+    function isApproveIncrement() {
       return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(["voteCount"]) &&
-        request.resource.data.voteCount == baseVoteCount() + 1;
+        .hasOnly(["approvePower"]) &&
+        request.resource.data.approvePower > baseApprovePower();
+    }
+
+    function isDenyIncrement() {
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(["denyPower"]) &&
+        request.resource.data.denyPower > baseDenyPower();
     }
 
     function isThreadIncrement() {
       return request.resource.data.diff(resource.data).changedKeys()
         .hasOnly(["threadCount"]) &&
-        request.resource.data.threadCount == baseThreadCount() + 1;
+        request.resource.data.threadCount > baseThreadCount();
     }
 
     function isValidThread(data) {
@@ -80,17 +93,31 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if true;
       allow create: if isSignedIn() && isValidPost(request.resource.data);      
-      allow update: if isSignedIn() && (isVoteIncrement() || isThreadIncrement());
+      allow update: if isSignedIn() && (
+        isApproveIncrement() ||
+        isDenyIncrement() ||
+        isThreadIncrement()
+      );
       allow delete: if false;
 
       match /votes/{voteId} {
         allow read: if true;
         allow create: if isSignedIn() &&
-          request.resource.data.keys().hasOnly(["fid", "uid", "createdAt"]) &&  
+          request.resource.data.keys().hasOnly([
+            "fid",
+            "uid",
+            "direction",
+            "power",
+            "weekKey",
+            "createdAt"
+          ]) &&
           request.resource.data.uid == request.auth.uid &&
           request.resource.data.fid is int &&
-          request.resource.data.createdAt is timestamp &&
-          voteId == request.auth.uid;
+          request.resource.data.direction in ["approve", "deny"] &&
+          isNumber(request.resource.data.power) &&
+          request.resource.data.power > 0 &&
+          request.resource.data.weekKey is string &&
+          request.resource.data.createdAt is timestamp;
         allow update, delete: if false;
       }
 

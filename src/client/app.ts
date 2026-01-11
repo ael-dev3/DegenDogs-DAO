@@ -45,6 +45,7 @@ const POST_TITLE_MAX = 120;
 const POST_BODY_MAX = 1200;
 const THREAD_BODY_MAX = 800;
 const THREADS_LIMIT = 8;
+const MAX_SAFE_POWER = BigInt(Number.MAX_SAFE_INTEGER);
 
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled =
@@ -77,6 +78,7 @@ const walletButtonLabel =
   walletButton.textContent?.trim() || "Connect wallet";
 const postsPanel = byId("posts-panel");
 const postsStatus = byId("posts-status");
+const powerStatus = byId("power-status");
 const postsList = byId("posts-list");
 const postsEmpty = byId("posts-empty");
 const postForm = byId("post-form") as HTMLFormElement;
@@ -106,6 +108,7 @@ let profileHoldings: { total: bigint; checked: number; failed: number } | null =
   null;
 let walletHoldings: bigint | null = null;
 let isHolder = false;
+let votingPower = 0n;
 let firestoreDb: any = null;
 let firestoreReady = false;
 let firestoreInitInProgress = false;
@@ -461,10 +464,29 @@ function setPostsStatus(state: string, text: string) {
   postsStatus.textContent = text;
 }
 
+function setPowerStatus(value: bigint) {
+  powerStatus.textContent = `Voting power: ${value.toString()}`;
+}
+
+function getVotingPower() {
+  const profileTotal = profileHoldings?.total ?? 0n;
+  const walletTotal = walletHoldings ?? 0n;
+  return profileTotal > walletTotal ? profileTotal : walletTotal;
+}
+
+function getVotingPowerNumber() {
+  if (votingPower > MAX_SAFE_POWER) {
+    return null;
+  }
+  return Number(votingPower);
+}
+
 function updateHolderState() {
   const profileTotal = profileHoldings?.total ?? 0n;
   const walletTotal = walletHoldings ?? 0n;
   isHolder = profileTotal > 0n || walletTotal > 0n;
+  votingPower = getVotingPower();
+  setPowerStatus(votingPower);
   updatePostFormState();
 }
 
@@ -504,15 +526,20 @@ function updatePostFormState() {
     return;
   }
   if (!hasSignedIn) {
-    setPostsStatus("warn", "Sign in to create posts and vote.");
+    setPostsStatus("warn", "Sign in to create posts, vote, and reply.");
     updatePostListControls();
     return;
   }
   if (!isHolder) {
     setPostsStatus(
       "warn",
-      "Only Degen Dogs holders can create posts or vote.",
+      "Only Degen Dogs holders can create posts, vote, or reply.",
     );
+    updatePostListControls();
+    return;
+  }
+  if (votingPower <= 0n) {
+    setPostsStatus("warn", "No voting power detected yet.");
     updatePostListControls();
     return;
   }
@@ -572,7 +599,8 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     return;
   }
   postsEmpty.hidden = true;
-  const canInteract = firestoreReady && !!firebaseUser && hasSignedIn && isHolder;
+  const canInteract =
+    firestoreReady && !!firebaseUser && hasSignedIn && isHolder;
   for (const post of posts) {
     const card = document.createElement("article");
     card.className = "post-card";
@@ -597,23 +625,65 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
 
     const actions = document.createElement("div");
     actions.className = "post-actions";
-    const voteButton = document.createElement("button");
-    voteButton.type = "button";
-    voteButton.textContent = "Vote";
-    voteButton.disabled = !canInteract;
-    voteButton.dataset.postVote = "1";
-    const voteCount = document.createElement("span");
-    voteCount.className = "vote-count";
-    const countValue =
-      typeof post.voteCount === "number" ? post.voteCount : 0;
-    voteCount.textContent = `${countValue} votes`;
 
-    voteButton.addEventListener("click", () => {
-      void voteOnPost(String(post.id), voteButton, voteCount);
+    const approveGroup = document.createElement("div");
+    approveGroup.className = "vote-group";
+    const approveButton = document.createElement("button");
+    approveButton.type = "button";
+    approveButton.textContent = "Approve";
+    approveButton.disabled = !canInteract;
+    approveButton.dataset.postVote = "1";
+    const approveCount = document.createElement("span");
+    approveCount.className = "vote-count";
+    const legacyVote =
+      typeof post.voteCount === "number" ? post.voteCount : 0;
+    const approveValue =
+      typeof post.approvePower === "number" ? post.approvePower : legacyVote;
+    approveCount.textContent = `${approveValue} approve`;
+    approveCount.dataset.value = String(approveValue);
+    approveGroup.appendChild(approveButton);
+    approveGroup.appendChild(approveCount);
+
+    const denyGroup = document.createElement("div");
+    denyGroup.className = "vote-group";
+    const denyButton = document.createElement("button");
+    denyButton.type = "button";
+    denyButton.textContent = "Deny";
+    denyButton.disabled = !canInteract;
+    denyButton.dataset.postVote = "1";
+    const denyCount = document.createElement("span");
+    denyCount.className = "vote-count";
+    const denyValue =
+      typeof post.denyPower === "number" ? post.denyPower : 0;
+    denyCount.textContent = `${denyValue} deny`;
+    denyCount.dataset.value = String(denyValue);
+    denyGroup.appendChild(denyButton);
+    denyGroup.appendChild(denyCount);
+
+    approveButton.addEventListener("click", () => {
+      void castPostVote(
+        String(post.id),
+        "approve",
+        approveButton,
+        denyButton,
+        approveCount,
+        denyCount,
+      );
     });
 
-    actions.appendChild(voteButton);
-    actions.appendChild(voteCount);
+    denyButton.addEventListener("click", () => {
+      void castPostVote(
+        String(post.id),
+        "deny",
+        approveButton,
+        denyButton,
+        approveCount,
+        denyCount,
+      );
+    });
+
+    actions.appendChild(approveGroup);
+    actions.appendChild(denyGroup);
 
     const threadSection = document.createElement("div");
     threadSection.className = "thread-section";
@@ -669,6 +739,11 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     threadForm.appendChild(threadInput);
     threadForm.appendChild(threadSubmit);
 
+    const powerNote = document.createElement("span");
+    powerNote.className = "vote-power";
+    powerNote.textContent = `Power ${votingPower.toString()}`;
+    actions.appendChild(powerNote);
+
     threadSection.appendChild(threadHeader);
     threadSection.appendChild(threadList);
     threadSection.appendChild(threadForm);
@@ -690,10 +765,12 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
 }
 
 function updatePostListControls() {
-  const canInteract = firestoreReady && !!firebaseUser && hasSignedIn && isHolder;
+  const canInteract =
+    firestoreReady && !!firebaseUser && hasSignedIn && isHolder;
+  const canVote = canInteract && votingPower > 0n;
   const voteButtons = document.querySelectorAll("[data-post-vote]");
   voteButtons.forEach((button) => {
-    (button as HTMLButtonElement).disabled = !canInteract;
+    (button as HTMLButtonElement).disabled = !canVote;
   });
   const threadInputs = document.querySelectorAll("[data-thread-input]");
   threadInputs.forEach((input) => {
@@ -919,7 +996,8 @@ async function createPost() {
       fid,
       uid,
       createdAt: serverTimestamp(),
-      voteCount: 0,
+      approvePower: 0,
+      denyPower: 0,
       threadCount: 0,
       ...profileFields,
     });
@@ -937,10 +1015,21 @@ async function createPost() {
   }
 }
 
-async function voteOnPost(
+type VoteDirection = "approve" | "deny";
+
+function weekKeyForNow() {
+  const ms = Date.now();
+  const weekIndex = Math.floor(ms / (7 * 24 * 60 * 60 * 1000));
+  return `week-${weekIndex}`;
+}
+
+async function castPostVote(
   postId: string,
-  button: HTMLButtonElement,
-  countEl: HTMLElement,
+  direction: VoteDirection,
+  approveButton: HTMLButtonElement,
+  denyButton: HTMLButtonElement,
+  approveCount: HTMLElement,
+  denyCount: HTMLElement,
 ) {
   if (!firestoreDb || !firebaseUser || !fid || !hasSignedIn) {
     setPostsStatus("warn", "Sign in to vote.");
@@ -950,39 +1039,55 @@ async function voteOnPost(
     setPostsStatus("warn", "Only holders can vote.");
     return;
   }
+  if (votingPower <= 0n) {
+    setPostsStatus("warn", "No voting power detected.");
+    return;
+  }
+  const power = getVotingPowerNumber();
+  if (!power) {
+    setPostsStatus("error", "Voting power is too large to submit.");
+    return;
+  }
 
+  approveButton.disabled = true;
+  denyButton.disabled = true;
+  setPostsStatus("idle", `Casting ${direction} vote (${power} power)...`);
   const uid = firebaseUser.uid;
-  button.disabled = true;
   try {
-    let didVote = false;
+    const postRef = doc(firestoreDb, "posts", postId);
+    const votesRef = collection(firestoreDb, "posts", postId, "votes");
+    const voteRef = doc(votesRef);
     await runTransaction(firestoreDb, async (tx: any) => {
-      const postRef = doc(firestoreDb, "posts", postId);
-      const voteRef = doc(firestoreDb, "posts", postId, "votes", uid);
-      const voteSnap = await tx.get(voteRef);
-      if (voteSnap.exists()) {
-        return;
-      }
       tx.set(voteRef, {
-        fid,
         uid,
+        fid,
+        direction,
+        power,
+        weekKey: weekKeyForNow(),
         createdAt: serverTimestamp(),
       });
-      tx.update(postRef, {
-        voteCount: increment(1),
-      });
-      didVote = true;
+      const update =
+        direction === "approve"
+          ? { approvePower: increment(power) }
+          : { denyPower: increment(power) };
+      tx.update(postRef, update);
     });
-    if (didVote) {
-      const current = Number(countEl.textContent?.split(" ")[0] || 0);
-      countEl.textContent = `${current + 1} votes`;
-      setPostsStatus("ok", "Vote recorded.");
-    } else {
-      setPostsStatus("warn", "You already voted on this post.");
-    }
+    const approveValue = Number(approveCount.dataset.value ?? "0");
+    const denyValue = Number(denyCount.dataset.value ?? "0");
+    const nextApprove =
+      direction === "approve" ? approveValue + power : approveValue;
+    const nextDeny = direction === "deny" ? denyValue + power : denyValue;
+    approveCount.dataset.value = String(nextApprove);
+    denyCount.dataset.value = String(nextDeny);
+    approveCount.textContent = `${nextApprove} approve`;
+    denyCount.textContent = `${nextDeny} deny`;
+    setPostsStatus("ok", `Vote recorded with ${power} power.`);
   } catch (err) {
     logError("Posts: vote", err);
-    setPostsStatus("error", "Unable to record vote.");
-    button.disabled = false;
+    const detail = truncate(errorMessage(err), 160);
+    setPostsStatus("error", `Unable to record vote. ${detail}`);
+  } finally {
+    updatePostListControls();
   }
 }
 
@@ -1839,6 +1944,7 @@ async function init() {
   void initFirestore().then(() => {
     void loadPosts();
   });
+  setPowerStatus(votingPower);
   updatePostFormState();
 }
 
