@@ -13,7 +13,7 @@ const debugEnabled = urlParams.has("debug") || window.localStorage.getItem("debu
 const apiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
 const apiOrigin = (apiOriginOverride || document.body.dataset.apiOrigin || "")
     .trim();
-const apiBase = apiOrigin || window.location.origin;
+const apiBase = resolveApiBase(apiOrigin || window.location.origin);
 const authStatus = byId("auth-status");
 const walletStatus = byId("wallet-status");
 const chainStatus = byId("chain-status");
@@ -51,6 +51,16 @@ function setBusy(button, isBusy) {
 }
 function setButtonLabel(text) {
     authButton.textContent = text;
+}
+function resolveApiBase(raw) {
+    let base = raw.trim();
+    if (!base) {
+        return window.location.origin;
+    }
+    if (base.includes("/api/verify")) {
+        base = base.replace(/\/api\/verify\/?$/, "");
+    }
+    return base.replace(/\/+$/, "");
 }
 function setDebugValue(el, text) {
     if (el) {
