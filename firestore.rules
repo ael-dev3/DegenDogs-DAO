@@ -16,6 +16,7 @@ service cloud.firestore {
         "fid",
         "username",
         "displayName",
+        "pfpUrl",
         "createdAt",
         "approvePower",
         "denyPower",
@@ -38,7 +39,8 @@ service cloud.firestore {
       data.uid == request.auth.uid &&
       data.createdAt is timestamp &&
       (!("username" in data) || data.username is string) &&
-      (!("displayName" in data) || data.displayName is string);
+      (!("displayName" in data) || data.displayName is string) &&
+      (!("pfpUrl" in data) || data.pfpUrl is string);
     }
 
     function baseApprovePower() {
@@ -54,20 +56,26 @@ service cloud.firestore {
     }
 
     function isApproveIncrement() {
-      return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(["approvePower"]) &&
+      return (request.writeFields.hasOnly(["approvePower"]) ||
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["approvePower"])) &&
+        isNumber(request.resource.data.approvePower) &&
         request.resource.data.approvePower > baseApprovePower();
     }
 
     function isDenyIncrement() {
-      return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(["denyPower"]) &&
+      return (request.writeFields.hasOnly(["denyPower"]) ||
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["denyPower"])) &&
+        isNumber(request.resource.data.denyPower) &&
         request.resource.data.denyPower > baseDenyPower();
     }
 
     function isThreadIncrement() {
-      return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(["threadCount"]) &&
+      return (request.writeFields.hasOnly(["threadCount"]) ||
+        request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["threadCount"])) &&
+        isNumber(request.resource.data.threadCount) &&
         request.resource.data.threadCount > baseThreadCount();
     }
 
@@ -78,6 +86,7 @@ service cloud.firestore {
         "uid",
         "username",
         "displayName",
+        "pfpUrl",
         "createdAt"
       ]) &&
       data.body is string &&
@@ -87,7 +96,8 @@ service cloud.firestore {
       data.uid == request.auth.uid &&
       data.createdAt is timestamp &&
       (!("username" in data) || data.username is string) &&
-      (!("displayName" in data) || data.displayName is string);
+      (!("displayName" in data) || data.displayName is string) &&
+      (!("pfpUrl" in data) || data.pfpUrl is string);
     }
 
     match /posts/{postId} {

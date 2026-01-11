@@ -7,11 +7,11 @@
     <link rel="preconnect" href="https://auth.farcaster.xyz">
     <link rel="icon" href="/dog.png">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="/assets/styles.css?v=20260111-25">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260111-31">
   </head>
   <body
     data-api-origin="https://degendogs-dao.ael-dev3.deno.net"
-    data-app-version="20260111-25"
+    data-app-version="20260111-31"
     data-firebase-api-key=""
     data-firebase-auth-domain=""
     data-firebase-project-id="degendogs-dao"
@@ -20,6 +20,14 @@
     data-firebase-storage-bucket=""
   >
     <main class="app">
+      <header class="topbar">
+        <div class="brand">Degen Dogs DAO</div>
+        <div id="wallet-pill" class="wallet-pill disconnected" role="status" aria-live="polite">
+          <span class="wallet-dot" aria-hidden="true"></span>
+          <span id="wallet-pill-label">Wallet not connected</span>
+          <span id="wallet-pill-count" class="wallet-count" hidden>0</span>
+        </div>
+      </header>
       <header class="hero">
         <p class="eyebrow">Farcaster Mini App</p>
         <h1>Degen Dogs DAO</h1>
@@ -48,7 +56,7 @@
 
         <div class="actions">
           <button id="auth-btn" class="primary" type="button">Sign in &amp; verify</button>
-          <button id="wallet-btn" type="button" disabled>Connect wallet</button>
+          <button id="wallet-btn" class="ghost" type="button" disabled>Connect wallet</button>
         </div>
 
         <p class="hint">We verify Farcaster addresses first, then auto-check your connected wallet when available. Tap Connect wallet if needed.</p>
@@ -85,7 +93,7 @@
             <p class="lede">Create holder-only posts and vote on what happens next.</p>
             <p id="power-status" class="power-line">Voting power: 0</p>
           </div>
-          <button id="refresh-posts" type="button">Refresh</button>
+          <button id="refresh-posts" class="ghost" type="button">Refresh</button>
         </header>
 
         <div id="posts-status" class="result" data-state="idle" role="status" aria-live="polite">Loading posts...</div>
@@ -106,6 +114,6 @@
         <div id="posts-list" class="posts"></div>
       </section>
     </main>
-    <script type="module" src="/assets/app.js?v=20260111-25"></script>
+    <script type="module" src="/assets/app.js?v=20260111-31"></script>
   </body>
 </html>

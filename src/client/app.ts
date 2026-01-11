@@ -23,10 +23,17 @@ type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 };
 
+type UserProfile = {
+  username?: string;
+  displayName?: string;
+  pfpUrl?: string;
+};
+
 type VerifyResponse = {
   fid: number;
   username?: string;
   displayName?: string;
+  pfpUrl?: string;
   custodyAddress?: string;
   verifiedEthAddresses?: string[];
 };
@@ -46,6 +53,7 @@ const POST_BODY_MAX = 1200;
 const THREAD_BODY_MAX = 800;
 const THREADS_LIMIT = 8;
 const MAX_SAFE_POWER = BigInt(Number.MAX_SAFE_INTEGER);
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled =
@@ -76,6 +84,9 @@ const authButtonLabel =
 const walletButton = byId("wallet-btn") as HTMLButtonElement;
 const walletButtonLabel =
   walletButton.textContent?.trim() || "Connect wallet";
+const walletPill = document.getElementById("wallet-pill");
+const walletPillLabel = document.getElementById("wallet-pill-label");
+const walletPillCount = document.getElementById("wallet-pill-count");
 const postsPanel = byId("posts-panel");
 const postsStatus = byId("posts-status");
 const powerStatus = byId("power-status");
@@ -97,7 +108,8 @@ const scriptLoadCache = new Map<string, Promise<void>>();
 let provider: EthereumProvider | null = null;
 let address: string | null = null;
 let fid: number | null = null;
-let userProfile: { username?: string; displayName?: string } | null = null;
+let userProfile: UserProfile | null = null;
+let contextProfile: UserProfile | null = null;
 let verifiedAddresses: string[] = [];
 let hasSignedIn = false;
 let sdkReady = false;
@@ -117,6 +129,7 @@ let firebaseUser: { uid: string } | null = null;
 let firebaseAuthReady = false;
 let firebaseAuthPending = false;
 let firebaseAuthError = false;
+let voteResetTimer: number | null = null;
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -468,6 +481,26 @@ function setPowerStatus(value: bigint) {
   powerStatus.textContent = `Voting power: ${value.toString()}`;
 }
 
+function updateWalletPill() {
+  if (!walletPill || !walletPillLabel || !walletPillCount) {
+    return;
+  }
+  const connected = !!address;
+  walletPill.classList.toggle("connected", connected);
+  walletPill.classList.toggle("disconnected", !connected);
+  const label = connected && address
+    ? `Wallet ${formatAddress(address)}`
+    : "Wallet not connected";
+  walletPillLabel.textContent = label;
+  if (connected) {
+    walletPillCount.hidden = false;
+    walletPillCount.textContent = (walletHoldings ?? 0n).toString();
+  } else {
+    walletPillCount.hidden = true;
+    walletPillCount.textContent = "0";
+  }
+}
+
 function getVotingPower() {
   const profileTotal = profileHoldings?.total ?? 0n;
   const walletTotal = walletHoldings ?? 0n;
@@ -481,12 +514,95 @@ function getVotingPowerNumber() {
   return Number(votingPower);
 }
 
+function clampVoteValue(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return max;
+  }
+  if (max <= min) {
+    return max;
+  }
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function weekKeyForNow() {
+  const ms = Date.now();
+  const weekIndex = Math.floor(ms / WEEK_MS);
+  return `week-${weekIndex}`;
+}
+
+function nextWeekResetTime(nowMs = Date.now()) {
+  const weekIndex = Math.floor(nowMs / WEEK_MS);
+  return (weekIndex + 1) * WEEK_MS;
+}
+
+function formatCountdown(ms: number) {
+  const clamped = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(clamped / 86400);
+  const hours = Math.floor((clamped % 86400) / 3600);
+  const minutes = Math.floor((clamped % 3600) / 60);
+  const parts = [];
+  if (days) {
+    parts.push(`${days}d`);
+  }
+  if (hours || days) {
+    parts.push(`${hours}h`);
+  }
+  parts.push(`${minutes}m`);
+  return parts.join(" ");
+}
+
+function buildResetHint() {
+  const now = Date.now();
+  const resetAt = nextWeekResetTime(now);
+  const resetIn = formatCountdown(resetAt - now);
+  return {
+    label: `Weekly cooldown - Resets in ${resetIn}`,
+    title: `Weekly cooldown. Resets at ${new Date(resetAt).toLocaleString()}`,
+  };
+}
+
+function updateVoteResetHints() {
+  const hint = buildResetHint();
+  const nodes = document.querySelectorAll("[data-vote-reset]");
+  nodes.forEach((node) => {
+    node.textContent = hint.label;
+    (node as HTMLElement).title = hint.title;
+  });
+}
+
+function startVoteResetTimer() {
+  updateVoteResetHints();
+  if (voteResetTimer !== null) {
+    window.clearInterval(voteResetTimer);
+  }
+  voteResetTimer = window.setInterval(() => {
+    updateVoteResetHints();
+  }, 60 * 1000);
+}
+
+function updateVoteWheel(
+  wheel: HTMLElement,
+  value: number,
+  max: number,
+  labelEl: HTMLElement | null,
+) {
+  const percent = max > 0 ? Math.min(1, value / max) : 0;
+  const angle = Math.round(percent * 360);
+  wheel.style.setProperty("--vote-angle", `${angle}deg`);
+  wheel.dataset.value = String(value);
+  wheel.dataset.max = String(max);
+  if (labelEl) {
+    labelEl.textContent = max > 0 ? `${value}/${max}` : "0";
+  }
+}
+
 function updateHolderState() {
   const profileTotal = profileHoldings?.total ?? 0n;
   const walletTotal = walletHoldings ?? 0n;
   isHolder = profileTotal > 0n || walletTotal > 0n;
   votingPower = getVotingPower();
   setPowerStatus(votingPower);
+  updateWalletPill();
   updatePostFormState();
 }
 
@@ -567,10 +683,144 @@ function formatPostDate(value: unknown) {
   return "Just now";
 }
 
-function optionalProfileFields(
-  profile: { username?: string; displayName?: string } | null,
+function normalizeProfile(raw: unknown): UserProfile | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const data = raw as {
+    username?: unknown;
+    displayName?: unknown;
+    pfpUrl?: unknown;
+  };
+  const username =
+    typeof data.username === "string" ? data.username.trim() : "";
+  const displayName =
+    typeof data.displayName === "string" ? data.displayName.trim() : "";
+  const pfpUrl = typeof data.pfpUrl === "string" ? data.pfpUrl.trim() : "";
+  const profile: UserProfile = {};
+  if (username) {
+    profile.username = username;
+  }
+  if (displayName) {
+    profile.displayName = displayName;
+  }
+  if (pfpUrl) {
+    profile.pfpUrl = pfpUrl;
+  }
+  return Object.keys(profile).length ? profile : null;
+}
+
+function mergeProfiles(primary: UserProfile | null, secondary: UserProfile | null) {
+  if (!primary && !secondary) {
+    return null;
+  }
+  return {
+    username: primary?.username || secondary?.username,
+    displayName: primary?.displayName || secondary?.displayName,
+    pfpUrl: primary?.pfpUrl || secondary?.pfpUrl,
+  };
+}
+
+function formatHandle(username: string) {
+  const trimmed = username.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}
+
+function formatAuthorLabel(record: Record<string, unknown>) {
+  const displayName =
+    typeof record.displayName === "string" ? record.displayName.trim() : "";
+  const username =
+    typeof record.username === "string" ? record.username.trim() : "";
+  if (displayName && username) {
+    return `${displayName} (${formatHandle(username)})`;
+  }
+  if (displayName) {
+    return displayName;
+  }
+  if (username) {
+    return formatHandle(username);
+  }
+  if (record.fid !== undefined && record.fid !== null) {
+    return `FID ${String(record.fid)}`;
+  }
+  return "Unknown";
+}
+
+function sanitizePfpUrl(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return "";
+  }
+  return trimmed;
+}
+
+function initialFromLabel(label: string) {
+  const trimmed = label.trim().replace(/^@/, "");
+  if (!trimmed) {
+    return "?";
+  }
+  return trimmed.slice(0, 1).toUpperCase();
+}
+
+function buildAvatar(
+  pfpUrl: unknown,
+  label: string,
+  compact = false,
 ) {
-  const data: { username?: string; displayName?: string } = {};
+  const avatar = document.createElement("div");
+  avatar.className = compact ? "avatar avatar--small" : "avatar";
+  const sanitized = sanitizePfpUrl(pfpUrl);
+  if (sanitized) {
+    const img = document.createElement("img");
+    img.src = sanitized;
+    img.alt = label ? `${label} avatar` : "Avatar";
+    img.loading = "lazy";
+    img.decoding = "async";
+    avatar.appendChild(img);
+    return avatar;
+  }
+  avatar.textContent = initialFromLabel(label);
+  return avatar;
+}
+
+function buildAuthorMeta(
+  metaClass: string,
+  record: Record<string, unknown>,
+  dateLabel: string,
+  compact = false,
+) {
+  const meta = document.createElement("div");
+  meta.className = metaClass;
+  const authorRow = document.createElement("div");
+  authorRow.className = "author-row";
+  const label = formatAuthorLabel(record);
+  const avatar = buildAvatar(record.pfpUrl, label, compact);
+  const name = document.createElement("span");
+  name.className = "author-name";
+  name.textContent = label;
+  authorRow.appendChild(avatar);
+  authorRow.appendChild(name);
+  const date = document.createElement("span");
+  date.className = "author-date";
+  date.textContent = dateLabel;
+  meta.appendChild(authorRow);
+  meta.appendChild(date);
+  return meta;
+}
+
+function optionalProfileFields(
+  profile: UserProfile | null,
+) {
+  const data: UserProfile = {};
   const username = (profile?.username || "").trim();
   if (username) {
     data.username = username;
@@ -578,6 +828,10 @@ function optionalProfileFields(
   const displayName = (profile?.displayName || "").trim();
   if (displayName) {
     data.displayName = displayName;
+  }
+  const pfpUrl = sanitizePfpUrl(profile?.pfpUrl ?? "");
+  if (pfpUrl) {
+    data.pfpUrl = pfpUrl;
   }
   return data;
 }
@@ -608,20 +862,109 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     const header = document.createElement("div");
     header.className = "post-header";
 
+    const headerTop = document.createElement("div");
+    headerTop.className = "post-top";
+
     const title = document.createElement("h3");
+    title.className = "post-title";
     title.textContent = String(post.title || "Untitled");
 
-    const meta = document.createElement("div");
-    meta.className = "post-meta";
-    const author = post.displayName || post.username || post.fid || "Unknown";
-    meta.textContent = `${author} - ${formatPostDate(post.createdAt)}`;
+    const quickActions = document.createElement("div");
+    quickActions.className = "post-quick";
 
-    header.appendChild(title);
+    headerTop.appendChild(title);
+    headerTop.appendChild(quickActions);
+
+    const meta = buildAuthorMeta(
+      "post-meta",
+      post,
+      formatPostDate(post.createdAt),
+    );
+
+    header.appendChild(headerTop);
     header.appendChild(meta);
 
     const body = document.createElement("p");
     body.className = "post-body";
     body.textContent = String(post.body || "");
+
+    const allocation = document.createElement("div");
+    allocation.className = "vote-allocation";
+
+    const voteWheel = document.createElement("div");
+    voteWheel.className = "vote-wheel";
+    voteWheel.dataset.voteWheel = "1";
+    const voteWheelValue = document.createElement("span");
+    voteWheelValue.className = "vote-wheel-value";
+    voteWheel.appendChild(voteWheelValue);
+
+    const voteInputs = document.createElement("div");
+    voteInputs.className = "vote-inputs";
+    const voteLabel = document.createElement("span");
+    voteLabel.className = "vote-label";
+    voteLabel.textContent = "Allocate votes";
+
+    const voteRange = document.createElement("input");
+    voteRange.type = "range";
+    voteRange.className = "vote-range";
+    voteRange.dataset.voteRange = "1";
+
+    const voteInputRow = document.createElement("div");
+    voteInputRow.className = "vote-input-row";
+    const voteAmount = document.createElement("input");
+    voteAmount.type = "number";
+    voteAmount.className = "vote-amount";
+    voteAmount.inputMode = "numeric";
+    voteAmount.step = "1";
+    voteAmount.dataset.voteAmount = "1";
+    const voteUnit = document.createElement("span");
+    voteUnit.className = "vote-unit";
+    voteUnit.textContent = "votes";
+    voteInputRow.appendChild(voteAmount);
+    voteInputRow.appendChild(voteUnit);
+
+    const voteHint = document.createElement("div");
+    voteHint.className = "vote-hint";
+    voteHint.dataset.voteReset = "1";
+
+    voteInputs.appendChild(voteLabel);
+    voteInputs.appendChild(voteRange);
+    voteInputs.appendChild(voteInputRow);
+    voteInputs.appendChild(voteHint);
+
+    allocation.appendChild(voteWheel);
+    allocation.appendChild(voteInputs);
+
+    const maxPower = getVotingPowerNumber() ?? 0;
+    const minPower = maxPower > 0 ? 1 : 0;
+    const initialPower = maxPower > 0 ? maxPower : 0;
+
+    const syncVoteAllocation = (nextValue: number, maxOverride?: number) => {
+      const maxValue = maxOverride ?? maxPower;
+      const minValue = maxValue > 0 ? 1 : 0;
+      const clamped = clampVoteValue(nextValue, minValue, maxValue);
+      voteRange.min = String(minValue);
+      voteRange.max = String(Math.max(minValue, maxValue));
+      voteRange.value = String(clamped);
+      voteAmount.min = String(minValue);
+      voteAmount.max = String(maxValue);
+      voteAmount.value = String(clamped);
+      const canVote = canInteract && maxValue > 0;
+      voteRange.disabled = !canVote;
+      voteAmount.disabled = !canVote;
+      updateVoteWheel(voteWheel, clamped, maxValue, voteWheelValue);
+      return clamped;
+    };
+
+    syncVoteAllocation(initialPower);
+
+    voteRange.addEventListener("input", () => {
+      syncVoteAllocation(Number(voteRange.value));
+    });
+
+    voteAmount.addEventListener("input", () => {
+      syncVoteAllocation(Number(voteAmount.value));
+    });
 
     const actions = document.createElement("div");
     actions.className = "post-actions";
@@ -631,6 +974,7 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     const approveButton = document.createElement("button");
     approveButton.type = "button";
     approveButton.textContent = "Approve";
+    approveButton.className = "vote-button vote-approve";
     approveButton.disabled = !canInteract;
     approveButton.dataset.postVote = "1";
     const approveCount = document.createElement("span");
@@ -649,6 +993,7 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     const denyButton = document.createElement("button");
     denyButton.type = "button";
     denyButton.textContent = "Deny";
+    denyButton.className = "vote-button vote-deny";
     denyButton.disabled = !canInteract;
     denyButton.dataset.postVote = "1";
     const denyCount = document.createElement("span");
@@ -661,6 +1006,11 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     denyGroup.appendChild(denyCount);
 
     approveButton.addEventListener("click", () => {
+      const maxValue = getVotingPowerNumber() ?? 0;
+      const selected = syncVoteAllocation(
+        Number(voteAmount.value || voteRange.value || maxValue),
+        maxValue,
+      );
       void castPostVote(
         String(post.id),
         "approve",
@@ -668,10 +1018,16 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
         denyButton,
         approveCount,
         denyCount,
+        selected,
       );
     });
 
     denyButton.addEventListener("click", () => {
+      const maxValue = getVotingPowerNumber() ?? 0;
+      const selected = syncVoteAllocation(
+        Number(voteAmount.value || voteRange.value || maxValue),
+        maxValue,
+      );
       void castPostVote(
         String(post.id),
         "deny",
@@ -679,14 +1035,16 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
         denyButton,
         approveCount,
         denyCount,
+        selected,
       );
     });
 
-    actions.appendChild(approveGroup);
-    actions.appendChild(denyGroup);
+    quickActions.appendChild(approveGroup);
+    quickActions.appendChild(denyGroup);
 
     const threadSection = document.createElement("div");
     threadSection.className = "thread-section";
+    threadSection.hidden = true;
 
     const threadHeader = document.createElement("div");
     threadHeader.className = "thread-header";
@@ -700,6 +1058,13 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     threadCount.dataset.total = String(threadCountValue);
     threadHeader.appendChild(threadTitle);
     threadHeader.appendChild(threadCount);
+
+    const threadToggle = document.createElement("button");
+    threadToggle.type = "button";
+    threadToggle.className = "thread-toggle ghost";
+    threadToggle.textContent = threadCountValue ? "View thread" : "Start thread";
+    threadToggle.dataset.threadToggle = "1";
+    threadToggle.dataset.expanded = "0";
 
     const threadList = document.createElement("div");
     threadList.className = "thread-list";
@@ -717,10 +1082,13 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     threadInput.maxLength = THREAD_BODY_MAX;
     threadInput.placeholder = "Write a reply";
     threadInput.disabled = !canInteract;
+    threadInput.id = `thread-${String(post.id)}-body`;
+    threadInput.name = "thread-body";
     threadInput.dataset.threadInput = "1";
     const threadSubmit = document.createElement("button");
     threadSubmit.type = "submit";
     threadSubmit.textContent = "Reply";
+    threadSubmit.className = "button-secondary";
     threadSubmit.disabled = !canInteract;
     threadSubmit.dataset.threadSubmit = "1";
 
@@ -743,6 +1111,7 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
     powerNote.className = "vote-power";
     powerNote.textContent = `Power ${votingPower.toString()}`;
     actions.appendChild(powerNote);
+    actions.appendChild(threadToggle);
 
     threadSection.appendChild(threadHeader);
     threadSection.appendChild(threadList);
@@ -750,16 +1119,28 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
 
     card.appendChild(header);
     card.appendChild(body);
+    card.appendChild(allocation);
     card.appendChild(actions);
     card.appendChild(threadSection);
     postsList.appendChild(card);
 
-    void loadThreadsForPost(
-      String(post.id),
-      threadList,
-      threadEmpty,
-      threadCount,
-    );
+    threadToggle.addEventListener("click", () => {
+      const isExpanded = threadToggle.dataset.expanded === "1";
+      threadToggle.dataset.expanded = isExpanded ? "0" : "1";
+      threadSection.hidden = isExpanded;
+      if (isExpanded) {
+        const currentTotal = Number(threadCount.dataset.total ?? "0");
+        threadToggle.textContent = currentTotal > 0 ? "View thread" : "Start thread";
+      } else {
+        threadToggle.textContent = "Hide thread";
+        void loadThreadsForPost(
+          String(post.id),
+          threadList,
+          threadEmpty,
+          threadCount,
+        );
+      }
+    });
   }
   updatePostListControls();
 }
@@ -776,6 +1157,8 @@ function updatePostListControls() {
   powerNotes.forEach((note) => {
     note.textContent = `Power ${votingPower.toString()}`;
   });
+  syncVoteAllocationControls(canInteract);
+  updateVoteResetHints();
   const threadInputs = document.querySelectorAll("[data-thread-input]");
   threadInputs.forEach((input) => {
     (input as HTMLTextAreaElement).disabled = !canInteract;
@@ -783,6 +1166,35 @@ function updatePostListControls() {
   const threadButtons = document.querySelectorAll("[data-thread-submit]");
   threadButtons.forEach((button) => {
     (button as HTMLButtonElement).disabled = !canInteract;
+  });
+}
+
+function syncVoteAllocationControls(canInteract: boolean) {
+  const maxValue = getVotingPowerNumber() ?? 0;
+  const minValue = maxValue > 0 ? 1 : 0;
+  const canVote = canInteract && maxValue > 0;
+  const allocations = document.querySelectorAll(".vote-allocation");
+  allocations.forEach((allocation) => {
+    const range = allocation.querySelector<HTMLInputElement>("[data-vote-range]");
+    const amount = allocation.querySelector<HTMLInputElement>(
+      "[data-vote-amount]",
+    );
+    const wheel = allocation.querySelector<HTMLElement>("[data-vote-wheel]");
+    if (!range || !amount || !wheel) {
+      return;
+    }
+    const wheelValue = allocation.querySelector<HTMLElement>(".vote-wheel-value");
+    const currentValue = Number(amount.value || range.value || maxValue);
+    const clamped = clampVoteValue(currentValue, minValue, maxValue);
+    range.min = String(minValue);
+    range.max = String(Math.max(minValue, maxValue));
+    range.value = String(clamped);
+    range.disabled = !canVote;
+    amount.min = String(minValue);
+    amount.max = String(maxValue);
+    amount.value = String(clamped);
+    amount.disabled = !canVote;
+    updateVoteWheel(wheel, clamped, maxValue, wheelValue);
   });
 }
 
@@ -815,11 +1227,12 @@ function renderThreads(
     const item = document.createElement("div");
     item.className = "thread-item";
 
-    const meta = document.createElement("div");
-    meta.className = "thread-meta";
-    const author =
-      thread.displayName || thread.username || thread.fid || "Unknown";
-    meta.textContent = `${author} - ${formatPostDate(thread.createdAt)}`;
+    const meta = buildAuthorMeta(
+      "thread-meta",
+      thread,
+      formatPostDate(thread.createdAt),
+      true,
+    );
 
     const body = document.createElement("p");
     body.className = "thread-body";
@@ -1021,12 +1434,6 @@ async function createPost() {
 
 type VoteDirection = "approve" | "deny";
 
-function weekKeyForNow() {
-  const ms = Date.now();
-  const weekIndex = Math.floor(ms / (7 * 24 * 60 * 60 * 1000));
-  return `week-${weekIndex}`;
-}
-
 async function castPostVote(
   postId: string,
   direction: VoteDirection,
@@ -1034,6 +1441,7 @@ async function castPostVote(
   denyButton: HTMLButtonElement,
   approveCount: HTMLElement,
   denyCount: HTMLElement,
+  selectedPower: number,
 ) {
   if (!firestoreDb || !firebaseUser || !fid || !hasSignedIn) {
     setPostsStatus("warn", "Sign in to vote.");
@@ -1047,9 +1455,14 @@ async function castPostVote(
     setPostsStatus("warn", "No voting power detected.");
     return;
   }
-  const power = getVotingPowerNumber();
-  if (!power) {
+  const maxPower = getVotingPowerNumber();
+  if (!maxPower) {
     setPostsStatus("error", "Voting power is too large to submit.");
+    return;
+  }
+  const power = clampVoteValue(selectedPower, 1, maxPower);
+  if (power <= 0) {
+    setPostsStatus("warn", "Select a vote amount first.");
     return;
   }
 
@@ -1057,11 +1470,27 @@ async function castPostVote(
   denyButton.disabled = true;
   setPostsStatus("idle", `Casting ${direction} vote (${power} power)...`);
   const uid = firebaseUser.uid;
+  let nextApproveValue = 0;
+  let nextDenyValue = 0;
   try {
     const postRef = doc(firestoreDb, "posts", postId);
     const votesRef = collection(firestoreDb, "posts", postId, "votes");
     const voteRef = doc(votesRef);
     await runTransaction(firestoreDb, async (tx: any) => {
+      const postSnap = await tx.get(postRef);
+      if (!postSnap.exists()) {
+        throw new Error("Post no longer exists.");
+      }
+      const postData = postSnap.data() as Record<string, unknown>;
+      const currentApprove = Number(postData.approvePower ?? 0);
+      const currentDeny = Number(postData.denyPower ?? 0);
+      if (!Number.isFinite(currentApprove) || !Number.isFinite(currentDeny)) {
+        throw new Error("Post vote totals are invalid.");
+      }
+      nextApproveValue =
+        direction === "approve" ? currentApprove + power : currentApprove;
+      nextDenyValue =
+        direction === "deny" ? currentDeny + power : currentDeny;
       tx.set(voteRef, {
         uid,
         fid,
@@ -1072,19 +1501,20 @@ async function castPostVote(
       });
       const update =
         direction === "approve"
-          ? { approvePower: increment(power) }
-          : { denyPower: increment(power) };
+          ? { approvePower: nextApproveValue }
+          : { denyPower: nextDenyValue };
       tx.update(postRef, update);
     });
-    const approveValue = Number(approveCount.dataset.value ?? "0");
-    const denyValue = Number(denyCount.dataset.value ?? "0");
-    const nextApprove =
-      direction === "approve" ? approveValue + power : approveValue;
-    const nextDeny = direction === "deny" ? denyValue + power : denyValue;
-    approveCount.dataset.value = String(nextApprove);
-    denyCount.dataset.value = String(nextDeny);
-    approveCount.textContent = `${nextApprove} approve`;
-    denyCount.textContent = `${nextDeny} deny`;
+    const approveValue = Number.isFinite(nextApproveValue)
+      ? nextApproveValue
+      : Number(approveCount.dataset.value ?? "0");
+    const denyValue = Number.isFinite(nextDenyValue)
+      ? nextDenyValue
+      : Number(denyCount.dataset.value ?? "0");
+    approveCount.dataset.value = String(approveValue);
+    denyCount.dataset.value = String(denyValue);
+    approveCount.textContent = `${approveValue} approve`;
+    denyCount.textContent = `${denyValue} deny`;
     setPostsStatus("ok", `Vote recorded with ${power} power.`);
   } catch (err) {
     logError("Posts: vote", err);
@@ -1571,6 +2001,23 @@ async function debugProbe() {
   }
 }
 
+async function loadContextProfile() {
+  try {
+    const context = await sdk.context;
+    const profile = normalizeProfile(
+      (context as { user?: unknown } | null)?.user,
+    );
+    if (profile) {
+      contextProfile = profile;
+      userProfile = mergeProfiles(userProfile, contextProfile);
+    }
+    return profile;
+  } catch (err) {
+    logError("SDK context profile", err);
+    return null;
+  }
+}
+
 async function handleSignIn(options: SignInOptions = {}) {
   if (signInInProgress) {
     return false;
@@ -1632,10 +2079,8 @@ async function handleSignIn(options: SignInOptions = {}) {
     }
     const data = parsed as VerifyResponse;
     fid = data.fid;
-    userProfile = {
-      username: data.username,
-      displayName: data.displayName,
-    };
+    const dataProfile = normalizeProfile(data);
+    userProfile = mergeProfiles(dataProfile, contextProfile);
     verifiedAddresses = Array.isArray(data.verifiedEthAddresses)
       ? data.verifiedEthAddresses
       : [];
@@ -1644,17 +2089,22 @@ async function handleSignIn(options: SignInOptions = {}) {
         new Set([...verifiedAddresses, data.custodyAddress]),
       );
     }
-    const handle = data.username ? `@${data.username}` : "";
-    setText(authStatus, handle ? `${handle} (FID ${fid})` : `FID ${fid}`);
+    const handle = userProfile?.username
+      ? formatHandle(userProfile.username)
+      : "";
+    const nameLabel = handle || userProfile?.displayName || "";
+    setText(authStatus, nameLabel ? `${nameLabel} (FID ${fid})` : `FID ${fid}`);
     setResult(
       "ok",
-      data.displayName
-        ? `${data.displayName} signed in.`
+      userProfile?.displayName
+        ? `${userProfile.displayName} signed in.`
         : "Farcaster sign in verified.",
     );
     logDebug("Auth: verified", {
       fid,
-      username: data.username,
+      username: userProfile?.username,
+      displayName: userProfile?.displayName,
+      pfpUrl: userProfile?.pfpUrl,
       verifiedAddressCount: verifiedAddresses.length,
     });
     signedIn = true;
@@ -1758,6 +2208,9 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
     activeProvider = await getProvider();
   } catch (err) {
     logError("Wallet provider", err);
+    address = null;
+    walletHoldings = null;
+    updateWalletPill();
     if (silent) {
       restoreSnapshot();
       return false;
@@ -1778,6 +2231,9 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
     logDebug("Wallet: provider ready");
     const accounts = await requestAccounts(activeProvider, allowPrompt);
     if (!accounts?.length) {
+      address = null;
+      walletHoldings = null;
+      updateWalletPill();
       if (silent) {
         restoreSnapshot();
       } else {
@@ -1813,6 +2269,7 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
     setText(dogsStatus, balance.toString());
     logDebug("Wallet: balance", balance.toString());
     walletHoldings = balance;
+    updateWalletPill();
     updateHolderState();
     const normalizedAddress = address.toLowerCase();
     const hasVerifiedMatch = verifiedAddresses.some(
@@ -1855,6 +2312,9 @@ async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
     setText(walletStatus, "Not connected");
     setText(chainStatus, "Unknown");
     setText(dogsStatus, "Unchecked");
+    address = null;
+    walletHoldings = null;
+    updateWalletPill();
     logError("Wallet", err);
     if (!silent) {
       setResult("error", errorMessage(err));
@@ -1915,6 +2375,7 @@ async function init() {
       await sdk.actions.ready();
       sdkReady = true;
       logDebug("SDK ready");
+      await loadContextProfile();
       try {
         const capabilities = await sdk.getCapabilities();
         supportsWallet = capabilities.includes("wallet.getEthereumProvider");
@@ -1949,6 +2410,8 @@ async function init() {
     void loadPosts();
   });
   setPowerStatus(votingPower);
+  updateWalletPill();
+  startVoteResetTimer();
   updatePostFormState();
 }
 

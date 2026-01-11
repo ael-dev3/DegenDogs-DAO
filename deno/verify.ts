@@ -284,6 +284,10 @@ Deno.serve(async (req) => {
         verifiedSet.add(custodyAddress);
       }
 
+      const pfpUrl =
+        (user?.pfp_url as string | undefined) ??
+        ((user?.pfp as { url?: string } | undefined)?.url ?? undefined);
+
       return new Response(
         JSON.stringify({
           fid,
@@ -294,6 +298,7 @@ Deno.serve(async (req) => {
             (user?.display_name as string | undefined) ??
             (user?.displayName as string | undefined) ??
             undefined,
+          pfpUrl,
           custodyAddress,
           verifiedEthAddresses: Array.from(verifiedSet),
         }),
