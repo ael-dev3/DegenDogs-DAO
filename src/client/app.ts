@@ -111,6 +111,31 @@ function truncate(value: string, max = 260) {
   return `${value.slice(0, max)}...`;
 }
 
+function decodeJwtPayload(token: string) {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+  const raw = parts[1] || "";
+  if (!raw) {
+    return null;
+  }
+  const base64 = raw.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+  try {
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function formatTokenTimestamp(value: unknown) {
+  if (typeof value !== "number") {
+    return undefined;
+  }
+  return new Date(value * 1000).toISOString();
+}
+
 function logDebug(message: string, detail?: unknown) {
   if (!debugEnabled || !debugLog) {
     return;
@@ -279,7 +304,20 @@ function formatErrorDetail(value: { error?: string; [key: string]: unknown }) {
   const base = value.error || "error";
   const extras = Object.entries(value)
     .filter(([key, item]) => key !== "error" && item !== undefined && item !== "")
-    .map(([key, item]) => `${key}=${String(item)}`);
+    .map(([key, item]) => {
+      if (
+        typeof item === "string" ||
+        typeof item === "number" ||
+        typeof item === "boolean"
+      ) {
+        return `${key}=${String(item)}`;
+      }
+      try {
+        return `${key}=${truncate(JSON.stringify(item), 260)}`;
+      } catch {
+        return `${key}=${String(item)}`;
+      }
+    });
   if (!extras.length) {
     return base;
   }
@@ -387,6 +425,39 @@ async function quickAuthFetch(url: string): Promise<AuthAttempt> {
   return { res, bodyText, parsed, url };
 }
 
+async function logQuickAuthToken(context: string) {
+  if (!debugEnabled) {
+    return;
+  }
+  try {
+    const tokenResult = await sdk.quickAuth.getToken();
+    const token =
+      typeof tokenResult === "string"
+        ? tokenResult
+        : tokenResult && typeof tokenResult === "object"
+          ? (tokenResult as { token?: string }).token
+          : undefined;
+    if (!token) {
+      logDebug(`${context}: token`, "none");
+      return;
+    }
+    const payload = decodeJwtPayload(token);
+    if (!payload) {
+      logDebug(`${context}: token`, "unreadable");
+      return;
+    }
+    logDebug(`${context}: token`, {
+      aud: payload.aud,
+      iss: payload.iss,
+      sub: payload.sub,
+      exp: formatTokenTimestamp(payload.exp),
+      iat: formatTokenTimestamp(payload.iat),
+    });
+  } catch (err) {
+    logError(`${context}: token`, err);
+  }
+}
+
 async function debugProbe() {
   if (!debugEnabled) {
     return;
@@ -435,6 +506,7 @@ async function handleSignIn() {
         logDebug("Auth: using fallback", activeAuthUrl);
       }
     }
+    await logQuickAuthToken("Auth");
 
     if (!res.ok) {
       if (res.status === 404 || res.status === 405) {
@@ -599,6 +671,14 @@ async function init() {
   try {
     await sdk.actions.ready();
     logDebug("SDK ready");
+    if (debugEnabled) {
+      try {
+        const context = await sdk.context;
+        logDebug("SDK context", context);
+      } catch (err) {
+        logError("SDK context", err);
+      }
+    }
   } catch (err) {
     logError("SDK ready", err);
     setResult("warn", "Not running inside a Farcaster host.");
