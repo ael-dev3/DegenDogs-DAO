@@ -772,6 +772,10 @@ function updatePostListControls() {
   voteButtons.forEach((button) => {
     (button as HTMLButtonElement).disabled = !canVote;
   });
+  const powerNotes = document.querySelectorAll(".vote-power");
+  powerNotes.forEach((note) => {
+    note.textContent = `Power ${votingPower.toString()}`;
+  });
   const threadInputs = document.querySelectorAll("[data-thread-input]");
   threadInputs.forEach((input) => {
     (input as HTMLTextAreaElement).disabled = !canInteract;
