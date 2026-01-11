@@ -25,6 +25,7 @@ const BASE_CHAIN_PARAMS = {
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled =
   urlParams.has("debug") || window.localStorage.getItem("debug") === "1";
+const appVersion = (document.body.dataset.appVersion || "").trim() || "unknown";
 const apiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
 const apiOrigin = (apiOriginOverride || document.body.dataset.apiOrigin || "")
   .trim();
@@ -41,6 +42,7 @@ const debugPanel = document.getElementById("debug-panel");
 const debugLog = document.getElementById("debug-log");
 const debugApi = document.getElementById("debug-api");
 const debugMode = document.getElementById("debug-mode");
+const debugVersion = document.getElementById("debug-version");
 const debugLines: string[] = [];
 
 let provider: EthereumProvider | null = null;
@@ -137,6 +139,7 @@ function apiConfigLines() {
     `URL: ${apiVerifyUrl}`,
     `data-api-origin: ${apiOrigin || "(empty)"}`,
     `window.origin: ${window.location.origin}`,
+    `version: ${appVersion}`,
   ];
 }
 
@@ -414,7 +417,9 @@ async function init() {
       debugMode,
       `on (${originNote}, crossOrigin=${apiBase !== window.location.origin})`,
     );
+    setDebugValue(debugVersion, appVersion);
     logDebug("Debug enabled");
+    logDebug("App version", appVersion);
     logDebug("Location", window.location.href);
     logDebug("API base", apiBase);
     if (apiOriginOverride) {
