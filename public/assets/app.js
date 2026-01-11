@@ -160,6 +160,16 @@ function errorMessage(err) {
         return String(err);
     }
 }
+function formatErrorDetail(value) {
+    const base = value.error || "error";
+    const extras = Object.entries(value)
+        .filter(([key, item]) => key !== "error" && item !== undefined && item !== "")
+        .map(([key, item]) => `${key}=${String(item)}`);
+    if (!extras.length) {
+        return base;
+    }
+    return `${base} (${extras.join(", ")})`;
+}
 async function getProvider() {
     if (provider) {
         return provider;
@@ -276,7 +286,7 @@ async function handleSignIn() {
                 throw new Error(authEndpointErrorMessage(res.status, bodyText, activeAuthUrl));
             }
             const detail = parsed && "error" in parsed && parsed.error
-                ? parsed.error
+                ? formatErrorDetail(parsed)
                 : bodyText
                     ? truncate(bodyText)
                     : `HTTP ${res.status}`;

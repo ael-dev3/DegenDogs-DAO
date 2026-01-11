@@ -114,6 +114,7 @@ async function fetchNeynarUser(fid: number) {
 Deno.serve(async (req) => {
   try {
     const origin = req.headers.get("origin") || "";
+    const originDomain = normalizeDomain(origin);
     const url = new URL(req.url);
 
     if (req.method === "OPTIONS") {
@@ -148,22 +149,22 @@ Deno.serve(async (req) => {
       });
     }
 
-    const domain = appDomain || hostFromHeaders(req.headers);
+    const domain = appDomain || originDomain || hostFromHeaders(req.headers);
     if (!domain) {
-    return new Response(
-      JSON.stringify({
-        error: "missing_domain",
-        hint: "Set APP_DOMAIN to your Mini App host (no scheme), e.g. degendogs-dao.web.app",
-      }),
-      {
-      status: 500,
-      headers: {
-        ...corsHeaders(origin),
-        "content-type": "application/json; charset=utf-8",
-      },
-    },
-    );
-  }
+      return new Response(
+        JSON.stringify({
+          error: "missing_domain",
+          hint: "Set APP_DOMAIN to your Mini App host (no scheme), e.g. degendogs-dao.web.app",
+        }),
+        {
+          status: 500,
+          headers: {
+            ...corsHeaders(origin),
+            "content-type": "application/json; charset=utf-8",
+          },
+        },
+      );
+    }
 
     try {
       const payload = await client.verifyJwt({ token, domain });
@@ -237,15 +238,17 @@ Deno.serve(async (req) => {
         JSON.stringify({
           error: "invalid_token",
           expectedDomain: domain,
+          originDomain,
+          appDomain: appDomain || undefined,
           hint: "Set APP_DOMAIN to your Mini App host (no scheme), e.g. degendogs-dao.web.app",
         }),
         {
-        status: 401,
-        headers: {
-          ...corsHeaders(origin),
-          "content-type": "application/json; charset=utf-8",
+          status: 401,
+          headers: {
+            ...corsHeaders(origin),
+            "content-type": "application/json; charset=utf-8",
+          },
         },
-      },
       );
     }
       console.error("Verification failed:", err);
