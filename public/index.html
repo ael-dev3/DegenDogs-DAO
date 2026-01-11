@@ -7,9 +7,9 @@
     <link rel="preconnect" href="https://auth.farcaster.xyz">
     <link rel="icon" href="/dog.png">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="/assets/styles.css?v=20260111-7">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260111-8">
   </head>
-  <body data-api-origin="https://degendogs-dao.ael-dev3.deno.net" data-app-version="20260111-7">
+  <body data-api-origin="https://degendogs-dao.ael-dev3.deno.net" data-app-version="20260111-8">
     <main class="app">
       <header class="hero">
         <p class="eyebrow">Farcaster Mini App</p>
@@ -38,13 +38,13 @@
         </div>
 
         <div class="actions">
-          <button id="auth-btn" class="primary" type="button">Sign in &amp; verify profile</button>
-          <button id="wallet-btn" type="button" disabled>Connect wallet (optional)</button>
+          <button id="auth-btn" class="primary" type="button">Sign in &amp; verify</button>
+          <button id="wallet-btn" type="button" disabled>Connect wallet</button>
         </div>
 
-        <p class="hint">We check verified addresses on your Farcaster profile via Base RPC. Connect a wallet to check a different address.</p>
+        <p class="hint">We verify Farcaster addresses first, then automatically check your connected wallet when available.</p>
 
-        <div id="result" class="result" data-state="idle" role="status" aria-live="polite">Ready to sign in and verify your profile.</div>
+        <div id="result" class="result" data-state="idle" role="status" aria-live="polite">Ready to sign in and verify your holdings.</div>
 
         <div id="debug-panel" class="debug" hidden>
           <div class="debug-row">
@@ -69,6 +69,6 @@
         </div>
       </section>
     </main>
-    <script type="module" src="/assets/app.js?v=20260111-7"></script>
+    <script type="module" src="/assets/app.js?v=20260111-8"></script>
   </body>
 </html>

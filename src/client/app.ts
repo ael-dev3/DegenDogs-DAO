@@ -48,7 +48,7 @@ const dogsStatus = byId("dogs-status");
 const resultBox = byId("result");
 const authButton = byId("auth-btn") as HTMLButtonElement;
 const authButtonLabel =
-  authButton.textContent?.trim() || "Sign in & verify profile";
+  authButton.textContent?.trim() || "Sign in & verify";
 const walletButton = byId("wallet-btn") as HTMLButtonElement;
 const walletButtonLabel =
   walletButton.textContent?.trim() || "Connect wallet";
@@ -64,6 +64,9 @@ let address: string | null = null;
 let fid: number | null = null;
 let verifiedAddresses: string[] = [];
 let hasSignedIn = false;
+let sdkReady = false;
+let profileHoldings: { total: bigint; checked: number; failed: number } | null =
+  null;
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -227,6 +230,24 @@ function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return count === 1 ? singular : plural;
 }
 
+function profileSummaryForWalletResult(summary: {
+  total: bigint;
+  checked: number;
+  failed: number;
+}) {
+  if (!summary.checked) {
+    return "No verified addresses on your Farcaster profile.";
+  }
+  const walletLabel = pluralize(summary.checked, "wallet");
+  const failureNote = summary.failed
+    ? ` ${summary.failed} ${pluralize(summary.failed, "address")} failed to load.`
+    : "";
+  if (summary.total > 0n) {
+    return `Verified addresses hold ${summary.total} Degen Dogs across ${summary.checked} ${walletLabel}.${failureNote}`;
+  }
+  return `No Degen Dogs found across ${summary.checked} verified ${walletLabel}.${failureNote}`;
+}
+
 function encodeBalanceOf(addr: string) {
   const clean = addr.toLowerCase().replace("0x", "");
   if (clean.length !== 40) {
@@ -269,6 +290,20 @@ function isMethodUnsupported(err: unknown) {
   );
 }
 
+function isUserRejected(err: unknown) {
+  const message = errorMessage(err).toLowerCase();
+  const code =
+    err && typeof err === "object"
+      ? (err as { code?: number | string }).code
+      : undefined;
+  return (
+    code === 4001 ||
+    code === "4001" ||
+    code === "ACTION_REJECTED" ||
+    message.includes("user rejected")
+  );
+}
+
 function normalizeChainId(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return `0x${value.toString(16)}`;
@@ -289,38 +324,36 @@ function normalizeChainId(value: unknown) {
   return null;
 }
 
-async function requestAccounts(activeProvider: EthereumProvider) {
-  try {
-    const accounts = (await activeProvider.request({
-      method: "eth_requestAccounts",
-    })) as string[];
-    if (accounts?.length) {
-      return accounts;
-    }
-  } catch (err) {
-    if (!isMethodUnsupported(err)) {
+async function requestAccounts(
+  activeProvider: EthereumProvider,
+  allowPrompt = true,
+) {
+  const methods = allowPrompt
+    ? ["eth_accounts", "eth_requestAccounts"]
+    : ["eth_accounts"];
+
+  for (const method of methods) {
+    try {
+      const accounts = (await activeProvider.request({
+        method,
+      })) as string[];
+      if (accounts?.length) {
+        return accounts;
+      }
+    } catch (err) {
+      if (isMethodUnsupported(err)) {
+        logDebug(`Wallet: ${method} unsupported`, errorMessage(err));
+        continue;
+      }
+      if (isUserRejected(err)) {
+        logDebug(`Wallet: ${method} rejected`, errorMessage(err));
+        return null;
+      }
       throw err;
     }
-    logDebug("Wallet: eth_requestAccounts unsupported", errorMessage(err));
   }
 
-  try {
-    const accounts = (await activeProvider.request({
-      method: "eth_accounts",
-    })) as string[];
-    if (accounts?.length) {
-      return accounts;
-    }
-  } catch (err) {
-    if (!isMethodUnsupported(err)) {
-      throw err;
-    }
-    logDebug("Wallet: eth_accounts unsupported", errorMessage(err));
-  }
-
-  throw new Error(
-    "Wallet provider does not expose accounts. Open the mini app in a Farcaster client with a connected wallet.",
-  );
+  return null;
 }
 
 async function rpcCallBase(method: string, params: unknown[]) {
@@ -354,6 +387,7 @@ async function balanceOfAddress(address: string) {
 }
 
 async function checkProfileHoldings() {
+  profileHoldings = null;
   setText(walletStatus, "Profile only");
   setText(chainStatus, "Base (rpc)");
   setText(dogsStatus, "Checking...");
@@ -371,7 +405,8 @@ async function checkProfileHoldings() {
       "warn",
       "No verified addresses on your Farcaster profile. Connect a wallet to check holdings.",
     );
-    return { total: 0n, checked: 0, failed: 0 };
+    profileHoldings = { total: 0n, checked: 0, failed: 0 };
+    return profileHoldings;
   }
 
   const results = await Promise.allSettled(
@@ -396,6 +431,7 @@ async function checkProfileHoldings() {
   if (!checked) {
     setText(dogsStatus, "Error");
     setResult("error", "Unable to check verified addresses right now.");
+    profileHoldings = null;
     return { total, checked, failed };
   }
 
@@ -416,7 +452,8 @@ async function checkProfileHoldings() {
     );
   }
 
-  return { total, checked, failed };
+  profileHoldings = { total, checked, failed };
+  return profileHoldings;
 }
 
 function formatErrorDetail(value: { error?: string; [key: string]: unknown }) {
@@ -489,12 +526,6 @@ async function ensureBaseChain(
         code,
         message,
       });
-      const messageLower = message.toLowerCase();
-      const isRejected =
-        code === 4001 ||
-        code === "4001" ||
-        code === "ACTION_REJECTED" ||
-        messageLower.includes("user rejected");
       if (code === 4902 || code === "4902") {
         try {
           await activeProvider.request({
@@ -508,7 +539,7 @@ async function ensureBaseChain(
           setText(chainStatus, chainId ? `Chain ${chainId} (rpc)` : "Unknown (rpc)");
           return { chainId, useRpcFallback: true };
         }
-      } else if (isMethodUnsupported(err) || isRejected) {
+      } else if (isMethodUnsupported(err) || isUserRejected(err)) {
         setText(chainStatus, chainId ? `Chain ${chainId} (rpc)` : "Unknown (rpc)");
         return { chainId, useRpcFallback: true };
       } else {
@@ -532,6 +563,11 @@ async function readResponseText(res: Response) {
     return "";
   }
 }
+
+type WalletCheckOptions = {
+  allowPrompt?: boolean;
+  silent?: boolean;
+};
 
 type AuthAttempt = {
   res: Response;
@@ -615,7 +651,6 @@ async function handleSignIn() {
   setResult("idle", "Requesting Farcaster sign in...");
   setText(authStatus, "Signing in...");
   setBusy(walletButton, true);
-  walletButton.disabled = true;
   setButtonLabel(walletButton, walletButtonLabel);
 
   let signedIn = false;
@@ -694,8 +729,20 @@ async function handleSignIn() {
       logError("Profile", err);
       setResult("error", errorMessage(err));
     }
-    walletButton.disabled = false;
+    let autoChecked = false;
+    if (sdkReady) {
+      setButtonLabel(walletButton, "Connecting wallet...");
+      autoChecked = await connectWalletAndCheck({
+        allowPrompt: true,
+        silent: true,
+      });
+    }
     setBusy(walletButton, false);
+    walletButton.disabled = false;
+    setButtonLabel(
+      walletButton,
+      autoChecked ? "Recheck wallet" : walletButtonLabel,
+    );
   } catch (err) {
     const msg = errorMessage(err);
     logError("Auth", err);
@@ -708,8 +755,9 @@ async function handleSignIn() {
     } else {
       setResult("error", msg);
     }
-    walletButton.disabled = true;
     setBusy(walletButton, false);
+    walletButton.disabled = true;
+    setButtonLabel(walletButton, walletButtonLabel);
   }
 
   hasSignedIn = signedIn;
@@ -726,47 +774,61 @@ async function handleWalletCheck() {
 
   setBusy(walletButton, true);
   setButtonLabel(walletButton, "Checking wallet...");
+  const checked = await connectWalletAndCheck({ allowPrompt: true, silent: false });
+  setBusy(walletButton, false);
+  setButtonLabel(walletButton, checked ? "Recheck wallet" : walletButtonLabel);
+  return checked;
+}
+
+async function connectWalletAndCheck(options: WalletCheckOptions = {}) {
+  const { allowPrompt = true, silent = false } = options;
+  if (!silent) {
+    setResult("idle", "Connecting Farcaster wallet...");
+  }
+  setText(walletStatus, "Connecting...");
+  setText(dogsStatus, "Checking...");
+
+  let activeProvider: EthereumProvider;
   try {
-    await connectWalletAndCheck();
-    return true;
+    activeProvider = await getProvider();
   } catch (err) {
-    const message = errorMessage(err);
-    const lower = message.toLowerCase();
-    if (
-      lower.includes("no wallet provider") ||
-      lower.includes("does not expose accounts")
-    ) {
+    logError("Wallet provider", err);
+    setText(walletStatus, "Not connected");
+    setText(chainStatus, "Unknown");
+    setText(dogsStatus, "Unchecked");
+    if (!silent) {
       setResult(
         "warn",
         "Wallet provider not available. Open this mini app inside Farcaster to connect a wallet.",
       );
-    } else {
-      setResult("error", message);
     }
     return false;
-  } finally {
-    setBusy(walletButton, false);
-    setButtonLabel(walletButton, "Recheck wallet");
   }
-}
-
-async function connectWalletAndCheck() {
-  setResult("idle", "Connecting Farcaster wallet...");
-  setText(walletStatus, "Connecting...");
-  setText(dogsStatus, "Checking...");
 
   try {
-    const activeProvider = await getProvider();
     logDebug("Wallet: provider ready");
     const { chainId } = await ensureBaseChain(activeProvider, false);
 
-    const accounts = await requestAccounts(activeProvider);
+    const accounts = await requestAccounts(activeProvider, allowPrompt);
+    if (!accounts?.length) {
+      setText(walletStatus, "Not connected");
+      setText(dogsStatus, "Unchecked");
+      if (!silent) {
+        setResult(
+          "warn",
+          "Wallet not connected. Tap Connect wallet to retry.",
+        );
+      }
+      return false;
+    }
 
     address = accounts[0];
     setText(walletStatus, formatAddress(address));
     logDebug("Wallet: account", formatAddress(address));
 
-    setResult("idle", "Checking Degen Dogs ownership...");
+    if (!silent) {
+      setResult("idle", "Checking Degen Dogs ownership...");
+    }
     const data = encodeBalanceOf(address);
     const rpcNote = " Read-only check via Base RPC.";
     const chainNote =
@@ -787,6 +849,19 @@ async function connectWalletAndCheck() {
       verifiedAddresses.length && !hasVerifiedMatch
         ? " Wallet not linked to your Farcaster profile."
         : "";
+
+    if (silent && profileHoldings) {
+      const profileNote = profileSummaryForWalletResult(profileHoldings);
+      const walletNote = `Connected wallet holds ${balance} Degen Dogs.`;
+      const combinedStatus =
+        balance > 0n || profileHoldings.total > 0n ? "ok" : "warn";
+      setResult(
+        combinedStatus,
+        `${profileNote} ${walletNote}${verificationNote}${chainNote}${rpcNote}`,
+      );
+      return true;
+    }
+
     if (balance > 0n) {
       setResult(
         "ok",
@@ -798,12 +873,16 @@ async function connectWalletAndCheck() {
         `No Degen Dogs found for this wallet.${verificationNote}${chainNote}${rpcNote}`,
       );
     }
+    return true;
   } catch (err) {
     setText(walletStatus, "Not connected");
     setText(chainStatus, "Unknown");
     setText(dogsStatus, "Unchecked");
     logError("Wallet", err);
-    throw err;
+    if (!silent) {
+      setResult("error", errorMessage(err));
+    }
+    return false;
   }
 }
 
@@ -837,6 +916,7 @@ async function init() {
 
   try {
     await sdk.actions.ready();
+    sdkReady = true;
     logDebug("SDK ready");
     if (debugEnabled) {
       try {
@@ -847,6 +927,7 @@ async function init() {
       }
     }
   } catch (err) {
+    sdkReady = false;
     logError("SDK ready", err);
     setResult("warn", "Not running inside a Farcaster host.");
   }
