@@ -5,6 +5,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isNumber(value) {
+      return value is int || value is float;
+    }
+
     function isValidPost(data) {
       return data.keys().hasOnly([
         "title",
@@ -24,9 +28,9 @@ service cloud.firestore {
       data.body.size() > 0 &&
       data.body.size() <= 1200 &&
       data.fid is int &&
-      data.voteCount is int &&
+      isNumber(data.voteCount) &&
       data.voteCount >= 0 &&
-      data.threadCount is int &&
+      isNumber(data.threadCount) &&
       data.threadCount >= 0 &&
       data.uid == request.auth.uid &&
       data.createdAt is timestamp &&
@@ -35,62 +39,22 @@ service cloud.firestore {
     }
 
     function baseVoteCount() {
-      return resource.data.voteCount is int ? resource.data.voteCount : 0;
+      return isNumber(resource.data.voteCount) ? resource.data.voteCount : 0;
     }
 
     function baseThreadCount() {
-      return resource.data.threadCount is int ? resource.data.threadCount : 0;
-    }
-
-    function threadCountUnchanged() {
-      return (!resource.data.keys().hasAny(["threadCount"]) &&
-        !request.resource.data.keys().hasAny(["threadCount"])) ||
-        request.resource.data.threadCount == baseThreadCount();
+      return isNumber(resource.data.threadCount) ? resource.data.threadCount : 0;
     }
 
     function isVoteIncrement() {
-      return request.resource.data.keys().hasOnly([
-        "title",
-        "body",
-        "fid",
-        "username",
-        "displayName",
-        "createdAt",
-        "voteCount",
-        "threadCount",
-        "uid"
-      ]) &&
-        request.resource.data.title == resource.data.title &&
-        request.resource.data.body == resource.data.body &&
-        request.resource.data.fid == resource.data.fid &&
-        request.resource.data.username == resource.data.username &&
-        request.resource.data.displayName == resource.data.displayName &&       
-        request.resource.data.uid == resource.data.uid &&
-        request.resource.data.createdAt == resource.data.createdAt &&
-        threadCountUnchanged() &&
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(["voteCount"]) &&
         request.resource.data.voteCount == baseVoteCount() + 1;
     }
 
     function isThreadIncrement() {
-      return request.resource.data.keys().hasOnly([
-        "title",
-        "body",
-        "fid",
-        "username",
-        "displayName",
-        "createdAt",
-        "voteCount",
-        "threadCount",
-        "uid"
-      ]) &&
-        request.resource.data.title == resource.data.title &&
-        request.resource.data.body == resource.data.body &&
-        request.resource.data.fid == resource.data.fid &&
-        request.resource.data.username == resource.data.username &&
-        request.resource.data.displayName == resource.data.displayName &&
-        request.resource.data.uid == resource.data.uid &&
-        request.resource.data.createdAt == resource.data.createdAt &&
-        request.resource.data.voteCount == baseVoteCount() &&
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(["threadCount"]) &&
         request.resource.data.threadCount == baseThreadCount() + 1;
     }
 
