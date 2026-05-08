@@ -53,7 +53,6 @@ const POST_BODY_MAX = 1200;
 const THREAD_BODY_MAX = 800;
 const THREADS_LIMIT = 8;
 const MAX_SAFE_POWER = BigInt(Number.MAX_SAFE_INTEGER);
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled =
@@ -129,7 +128,6 @@ let firebaseUser: { uid: string } | null = null;
 let firebaseAuthReady = false;
 let firebaseAuthPending = false;
 let firebaseAuthError = false;
-let voteResetTimer: number | null = null;
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -524,62 +522,6 @@ function clampVoteValue(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
-function weekKeyForNow() {
-  const ms = Date.now();
-  const weekIndex = Math.floor(ms / WEEK_MS);
-  return `week-${weekIndex}`;
-}
-
-function nextWeekResetTime(nowMs = Date.now()) {
-  const weekIndex = Math.floor(nowMs / WEEK_MS);
-  return (weekIndex + 1) * WEEK_MS;
-}
-
-function formatCountdown(ms: number) {
-  const clamped = Math.max(0, Math.floor(ms / 1000));
-  const days = Math.floor(clamped / 86400);
-  const hours = Math.floor((clamped % 86400) / 3600);
-  const minutes = Math.floor((clamped % 3600) / 60);
-  const parts = [];
-  if (days) {
-    parts.push(`${days}d`);
-  }
-  if (hours || days) {
-    parts.push(`${hours}h`);
-  }
-  parts.push(`${minutes}m`);
-  return parts.join(" ");
-}
-
-function buildResetHint() {
-  const now = Date.now();
-  const resetAt = nextWeekResetTime(now);
-  const resetIn = formatCountdown(resetAt - now);
-  return {
-    label: `Weekly cooldown - Resets in ${resetIn}`,
-    title: `Weekly cooldown. Resets at ${new Date(resetAt).toLocaleString()}`,
-  };
-}
-
-function updateVoteResetHints() {
-  const hint = buildResetHint();
-  const nodes = document.querySelectorAll("[data-vote-reset]");
-  nodes.forEach((node) => {
-    node.textContent = hint.label;
-    (node as HTMLElement).title = hint.title;
-  });
-}
-
-function startVoteResetTimer() {
-  updateVoteResetHints();
-  if (voteResetTimer !== null) {
-    window.clearInterval(voteResetTimer);
-  }
-  voteResetTimer = window.setInterval(() => {
-    updateVoteResetHints();
-  }, 60 * 1000);
-}
-
 function updateVoteWheel(
   wheel: HTMLElement,
   value: number,
@@ -846,6 +788,10 @@ function stripUndefined<T extends Record<string, unknown>>(data: T) {
   return cleaned as T;
 }
 
+function voteDocumentId(uid: string) {
+  return uid;
+}
+
 function renderPosts(posts: Array<Record<string, unknown>>) {
   postsList.innerHTML = "";
   if (!posts.length) {
@@ -925,7 +871,8 @@ function renderPosts(posts: Array<Record<string, unknown>>) {
 
     const voteHint = document.createElement("div");
     voteHint.className = "vote-hint";
-    voteHint.dataset.voteReset = "1";
+    voteHint.textContent = "One verified vote per proposal.";
+    voteHint.title = "Firestore rules enforce one vote per signed-in identity on each proposal.";
 
     voteInputs.appendChild(voteLabel);
     voteInputs.appendChild(voteRange);
@@ -1158,7 +1105,6 @@ function updatePostListControls() {
     note.textContent = `Power ${votingPower.toString()}`;
   });
   syncVoteAllocationControls(canInteract);
-  updateVoteResetHints();
   const threadInputs = document.querySelectorAll("[data-thread-input]");
   threadInputs.forEach((input) => {
     (input as HTMLTextAreaElement).disabled = !canInteract;
@@ -1475,8 +1421,12 @@ async function castPostVote(
   try {
     const postRef = doc(firestoreDb, "posts", postId);
     const votesRef = collection(firestoreDb, "posts", postId, "votes");
-    const voteRef = doc(votesRef);
+    const voteRef = doc(votesRef, voteDocumentId(uid));
     await runTransaction(firestoreDb, async (tx: any) => {
+      const existingVote = await tx.get(voteRef);
+      if (existingVote.exists()) {
+        throw new Error("You already voted on this proposal.");
+      }
       const postSnap = await tx.get(postRef);
       if (!postSnap.exists()) {
         throw new Error("Post no longer exists.");
@@ -1496,7 +1446,6 @@ async function castPostVote(
         fid,
         direction,
         power,
-        weekKey: weekKeyForNow(),
         createdAt: serverTimestamp(),
       });
       const update =
@@ -2411,7 +2360,6 @@ async function init() {
   });
   setPowerStatus(votingPower);
   updateWalletPill();
-  startVoteResetTimer();
   updatePostFormState();
 }
 

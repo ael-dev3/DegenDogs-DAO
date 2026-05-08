@@ -37,7 +37,7 @@ service cloud.firestore {
       isNumber(data.threadCount) &&
       data.threadCount >= 0 &&
       data.uid == request.auth.uid &&
-      data.createdAt is timestamp &&
+      data.createdAt == request.time &&
       (!("username" in data) || data.username is string) &&
       (!("displayName" in data) || data.displayName is string) &&
       (!("pfpUrl" in data) || data.pfpUrl is string);
@@ -55,26 +55,53 @@ service cloud.firestore {
       return isNumber(resource.data.threadCount) ? resource.data.threadCount : 0;
     }
 
-    function isApproveIncrement() {
-      return (request.writeFields.hasOnly(["approvePower"]) ||
-        request.resource.data.diff(resource.data).changedKeys()
-          .hasOnly(["approvePower"])) &&
-        isNumber(request.resource.data.approvePower) &&
-        request.resource.data.approvePower > baseApprovePower();
+    function userVotePath(postId) {
+      return /databases/$(database)/documents/posts/$(postId)/votes/$(request.auth.uid);
     }
 
-    function isDenyIncrement() {
-      return (request.writeFields.hasOnly(["denyPower"]) ||
-        request.resource.data.diff(resource.data).changedKeys()
-          .hasOnly(["denyPower"])) &&
+    function hasFreshUserVote(postId, direction, power) {
+      return existsAfter(userVotePath(postId)) &&
+        getAfter(userVotePath(postId)).data.keys().hasOnly([
+          "fid",
+          "uid",
+          "direction",
+          "power",
+          "createdAt"
+        ]) &&
+        getAfter(userVotePath(postId)).data.uid == request.auth.uid &&
+        getAfter(userVotePath(postId)).data.fid is int &&
+        getAfter(userVotePath(postId)).data.direction == direction &&
+        getAfter(userVotePath(postId)).data.power == power &&
+        getAfter(userVotePath(postId)).data.createdAt == request.time;
+    }
+
+    function isApproveIncrement(postId) {
+      return request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["approvePower"]) &&
+        isNumber(request.resource.data.approvePower) &&
+        request.resource.data.approvePower > baseApprovePower() &&
+        hasFreshUserVote(
+          postId,
+          "approve",
+          request.resource.data.approvePower - baseApprovePower()
+        );
+    }
+
+    function isDenyIncrement(postId) {
+      return request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["denyPower"]) &&
         isNumber(request.resource.data.denyPower) &&
-        request.resource.data.denyPower > baseDenyPower();
+        request.resource.data.denyPower > baseDenyPower() &&
+        hasFreshUserVote(
+          postId,
+          "deny",
+          request.resource.data.denyPower - baseDenyPower()
+        );
     }
 
     function isThreadIncrement() {
-      return (request.writeFields.hasOnly(["threadCount"]) ||
-        request.resource.data.diff(resource.data).changedKeys()
-          .hasOnly(["threadCount"])) &&
+      return request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(["threadCount"]) &&
         isNumber(request.resource.data.threadCount) &&
         request.resource.data.threadCount > baseThreadCount();
     }
@@ -94,7 +121,7 @@ service cloud.firestore {
       data.body.size() <= 800 &&
       data.fid is int &&
       data.uid == request.auth.uid &&
-      data.createdAt is timestamp &&
+      data.createdAt == request.time &&
       (!("username" in data) || data.username is string) &&
       (!("displayName" in data) || data.displayName is string) &&
       (!("pfpUrl" in data) || data.pfpUrl is string);
@@ -104,8 +131,8 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isSignedIn() && isValidPost(request.resource.data);      
       allow update: if isSignedIn() && (
-        isApproveIncrement() ||
-        isDenyIncrement() ||
+        isApproveIncrement(postId) ||
+        isDenyIncrement(postId) ||
         isThreadIncrement()
       );
       allow delete: if false;
@@ -118,16 +145,15 @@ service cloud.firestore {
             "uid",
             "direction",
             "power",
-            "weekKey",
             "createdAt"
           ]) &&
+          voteId == request.auth.uid &&
           request.resource.data.uid == request.auth.uid &&
           request.resource.data.fid is int &&
           request.resource.data.direction in ["approve", "deny"] &&
           isNumber(request.resource.data.power) &&
           request.resource.data.power > 0 &&
-          request.resource.data.weekKey is string &&
-          request.resource.data.createdAt is timestamp;
+          request.resource.data.createdAt == request.time;
         allow update, delete: if false;
       }
 

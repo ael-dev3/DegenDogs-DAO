@@ -17,7 +17,6 @@ const POST_BODY_MAX = 1200;
 const THREAD_BODY_MAX = 800;
 const THREADS_LIMIT = 8;
 const MAX_SAFE_POWER = BigInt(Number.MAX_SAFE_INTEGER);
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled = urlParams.has("debug") || window.localStorage.getItem("debug") === "1";
 const appVersion = (document.body.dataset.appVersion || "").trim() || "unknown";
@@ -82,7 +81,6 @@ let firebaseUser = null;
 let firebaseAuthReady = false;
 let firebaseAuthPending = false;
 let firebaseAuthError = false;
-let voteResetTimer = null;
 function byId(id) {
     const el = document.getElementById(id);
     if (!el) {
@@ -425,56 +423,6 @@ function clampVoteValue(value, min, max) {
     }
     return Math.max(min, Math.min(max, Math.floor(value)));
 }
-function weekKeyForNow() {
-    const ms = Date.now();
-    const weekIndex = Math.floor(ms / WEEK_MS);
-    return `week-${weekIndex}`;
-}
-function nextWeekResetTime(nowMs = Date.now()) {
-    const weekIndex = Math.floor(nowMs / WEEK_MS);
-    return (weekIndex + 1) * WEEK_MS;
-}
-function formatCountdown(ms) {
-    const clamped = Math.max(0, Math.floor(ms / 1000));
-    const days = Math.floor(clamped / 86400);
-    const hours = Math.floor((clamped % 86400) / 3600);
-    const minutes = Math.floor((clamped % 3600) / 60);
-    const parts = [];
-    if (days) {
-        parts.push(`${days}d`);
-    }
-    if (hours || days) {
-        parts.push(`${hours}h`);
-    }
-    parts.push(`${minutes}m`);
-    return parts.join(" ");
-}
-function buildResetHint() {
-    const now = Date.now();
-    const resetAt = nextWeekResetTime(now);
-    const resetIn = formatCountdown(resetAt - now);
-    return {
-        label: `Weekly cooldown - Resets in ${resetIn}`,
-        title: `Weekly cooldown. Resets at ${new Date(resetAt).toLocaleString()}`,
-    };
-}
-function updateVoteResetHints() {
-    const hint = buildResetHint();
-    const nodes = document.querySelectorAll("[data-vote-reset]");
-    nodes.forEach((node) => {
-        node.textContent = hint.label;
-        node.title = hint.title;
-    });
-}
-function startVoteResetTimer() {
-    updateVoteResetHints();
-    if (voteResetTimer !== null) {
-        window.clearInterval(voteResetTimer);
-    }
-    voteResetTimer = window.setInterval(() => {
-        updateVoteResetHints();
-    }, 60 * 1000);
-}
 function updateVoteWheel(wheel, value, max, labelEl) {
     const percent = max > 0 ? Math.min(1, value / max) : 0;
     const angle = Math.round(percent * 360);
@@ -700,6 +648,9 @@ function stripUndefined(data) {
     }
     return cleaned;
 }
+function voteDocumentId(uid) {
+    return uid;
+}
 function renderPosts(posts) {
     postsList.innerHTML = "";
     if (!posts.length) {
@@ -760,7 +711,8 @@ function renderPosts(posts) {
         voteInputRow.appendChild(voteUnit);
         const voteHint = document.createElement("div");
         voteHint.className = "vote-hint";
-        voteHint.dataset.voteReset = "1";
+        voteHint.textContent = "One verified vote per proposal.";
+        voteHint.title = "Firestore rules enforce one vote per signed-in identity on each proposal.";
         voteInputs.appendChild(voteLabel);
         voteInputs.appendChild(voteRange);
         voteInputs.appendChild(voteInputRow);
@@ -930,7 +882,6 @@ function updatePostListControls() {
         note.textContent = `Power ${votingPower.toString()}`;
     });
     syncVoteAllocationControls(canInteract);
-    updateVoteResetHints();
     const threadInputs = document.querySelectorAll("[data-thread-input]");
     threadInputs.forEach((input) => {
         input.disabled = !canInteract;
@@ -1204,8 +1155,12 @@ async function castPostVote(postId, direction, approveButton, denyButton, approv
     try {
         const postRef = doc(firestoreDb, "posts", postId);
         const votesRef = collection(firestoreDb, "posts", postId, "votes");
-        const voteRef = doc(votesRef);
+        const voteRef = doc(votesRef, voteDocumentId(uid));
         await runTransaction(firestoreDb, async (tx) => {
+            const existingVote = await tx.get(voteRef);
+            if (existingVote.exists()) {
+                throw new Error("You already voted on this proposal.");
+            }
             const postSnap = await tx.get(postRef);
             if (!postSnap.exists()) {
                 throw new Error("Post no longer exists.");
@@ -1225,7 +1180,6 @@ async function castPostVote(postId, direction, approveButton, denyButton, approv
                 fid,
                 direction,
                 power,
-                weekKey: weekKeyForNow(),
                 createdAt: serverTimestamp(),
             });
             const update = direction === "approve"
@@ -2024,7 +1978,6 @@ async function init() {
     });
     setPowerStatus(votingPower);
     updateWalletPill();
-    startVoteResetTimer();
     updatePostFormState();
 }
 init();
