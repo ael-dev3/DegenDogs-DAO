@@ -1034,6 +1034,7 @@ async function createThreadReply(postId, input, button, listEl, emptyEl, countEl
     setBusy(button, true);
     setPostsStatus("idle", "Posting reply...");
     try {
+        const previousTotal = Number(countEl.dataset.total ?? "0");
         const threadsRef = collection(firestoreDb, "posts", postId, "threads");
         const threadDoc = doc(threadsRef);
         const postRef = doc(firestoreDb, "posts", postId);
@@ -1054,8 +1055,8 @@ async function createThreadReply(postId, input, button, listEl, emptyEl, countEl
         input.value = "";
         setPostsStatus("ok", "Reply posted.");
         await loadThreadsForPost(postId, listEl, emptyEl, countEl);
-        const currentTotal = Number(countEl.dataset.total ?? "0");
-        const nextTotal = Number.isFinite(currentTotal) ? currentTotal + 1 : 1;
+        const renderedTotal = Number(countEl.dataset.total ?? "0");
+        const nextTotal = Math.max(Number.isFinite(renderedTotal) ? renderedTotal : 0, Number.isFinite(previousTotal) ? previousTotal + 1 : 1);
         countEl.dataset.total = String(nextTotal);
         countEl.textContent = formatReplyCount(nextTotal);
     }
