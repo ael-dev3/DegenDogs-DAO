@@ -591,10 +591,16 @@ function sanitizePfpUrl(value) {
     if (!trimmed) {
         return "";
     }
-    if (!/^https?:\/\//i.test(trimmed)) {
+    try {
+        const url = new URL(trimmed);
+        if (url.protocol !== "https:") {
+            return "";
+        }
+        return url.toString();
+    }
+    catch {
         return "";
     }
-    return trimmed;
 }
 function initialFromLabel(label) {
     const trimmed = label.trim().replace(/^@/, "");
