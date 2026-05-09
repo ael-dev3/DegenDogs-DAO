@@ -905,7 +905,8 @@ function updatePostListControls() {
     const canVote = canInteract && votingPower > 0n;
     const voteButtons = document.querySelectorAll("[data-post-vote]");
     voteButtons.forEach((button) => {
-        button.disabled = !canVote;
+        const voteButton = button;
+        voteButton.disabled = !canVote || voteButton.dataset.voted === "1";
     });
     const powerNotes = document.querySelectorAll(".vote-power");
     powerNotes.forEach((note) => {
@@ -1227,6 +1228,8 @@ async function castPostVote(postId, direction, approveButton, denyButton, approv
         denyCount.dataset.value = String(denyValue);
         approveCount.textContent = formatVoteCount(approveValue, "approve");
         denyCount.textContent = formatVoteCount(denyValue, "deny");
+        approveButton.dataset.voted = "1";
+        denyButton.dataset.voted = "1";
         setPostsStatus("ok", `Vote recorded with ${power} power.`);
     }
     catch (err) {
