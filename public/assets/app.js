@@ -16,6 +16,9 @@ const POST_TITLE_MAX = 120;
 const POST_BODY_MAX = 1200;
 const THREAD_BODY_MAX = 800;
 const THREADS_LIMIT = 8;
+const USERNAME_MAX = 64;
+const DISPLAY_NAME_MAX = 128;
+const PFP_URL_MAX = 512;
 const MAX_SAFE_POWER = BigInt(Number.MAX_SAFE_INTEGER);
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled = urlParams.has("debug") || safeLocalStorageGet("debug") === "1";
@@ -137,6 +140,9 @@ function truncate(value, max = 260) {
         return value;
     }
     return `${value.slice(0, max)}...`;
+}
+function limitText(value, max) {
+    return value.length > max ? value.slice(0, max) : value;
 }
 function decodeJwtPayload(token) {
     const parts = token.split(".");
@@ -543,9 +549,15 @@ function normalizeProfile(raw) {
         return null;
     }
     const data = raw;
-    const username = typeof data.username === "string" ? data.username.trim() : "";
-    const displayName = typeof data.displayName === "string" ? data.displayName.trim() : "";
-    const pfpUrl = typeof data.pfpUrl === "string" ? data.pfpUrl.trim() : "";
+    const username = typeof data.username === "string"
+        ? limitText(data.username.trim(), USERNAME_MAX)
+        : "";
+    const displayName = typeof data.displayName === "string"
+        ? limitText(data.displayName.trim(), DISPLAY_NAME_MAX)
+        : "";
+    const pfpUrl = typeof data.pfpUrl === "string"
+        ? limitText(data.pfpUrl.trim(), PFP_URL_MAX)
+        : "";
     const profile = {};
     if (username) {
         profile.username = username;
@@ -605,7 +617,7 @@ function sanitizePfpUrl(value) {
         if (url.protocol !== "https:") {
             return "";
         }
-        return url.toString();
+        return limitText(url.toString(), PFP_URL_MAX);
     }
     catch {
         return "";
@@ -655,11 +667,11 @@ function buildAuthorMeta(metaClass, record, dateLabel, compact = false) {
 }
 function optionalProfileFields(profile) {
     const data = {};
-    const username = (profile?.username || "").trim();
+    const username = limitText((profile?.username || "").trim(), USERNAME_MAX);
     if (username) {
         data.username = username;
     }
-    const displayName = (profile?.displayName || "").trim();
+    const displayName = limitText((profile?.displayName || "").trim(), DISPLAY_NAME_MAX);
     if (displayName) {
         data.displayName = displayName;
     }

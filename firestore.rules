@@ -9,6 +9,21 @@ service cloud.firestore {
       return value is int || value is float;
     }
 
+    function hasValidProfileFields(data) {
+      return (!("username" in data) || (
+          data.username is string &&
+          data.username.size() <= 64
+        )) &&
+        (!("displayName" in data) || (
+          data.displayName is string &&
+          data.displayName.size() <= 128
+        )) &&
+        (!("pfpUrl" in data) || (
+          data.pfpUrl is string &&
+          data.pfpUrl.size() <= 512
+        ));
+    }
+
     function isValidPost(data) {
       return data.keys().hasOnly([
         "title",
@@ -38,9 +53,7 @@ service cloud.firestore {
       data.threadCount >= 0 &&
       data.uid == request.auth.uid &&
       data.createdAt == request.time &&
-      (!("username" in data) || data.username is string) &&
-      (!("displayName" in data) || data.displayName is string) &&
-      (!("pfpUrl" in data) || data.pfpUrl is string);
+      hasValidProfileFields(data);
     }
 
     function baseApprovePower() {
@@ -122,9 +135,7 @@ service cloud.firestore {
       data.fid is int &&
       data.uid == request.auth.uid &&
       data.createdAt == request.time &&
-      (!("username" in data) || data.username is string) &&
-      (!("displayName" in data) || data.displayName is string) &&
-      (!("pfpUrl" in data) || data.pfpUrl is string);
+      hasValidProfileFields(data);
     }
 
     match /posts/{postId} {

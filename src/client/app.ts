@@ -52,6 +52,9 @@ const POST_TITLE_MAX = 120;
 const POST_BODY_MAX = 1200;
 const THREAD_BODY_MAX = 800;
 const THREADS_LIMIT = 8;
+const USERNAME_MAX = 64;
+const DISPLAY_NAME_MAX = 128;
+const PFP_URL_MAX = 512;
 const MAX_SAFE_POWER = BigInt(Number.MAX_SAFE_INTEGER);
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -196,6 +199,10 @@ function truncate(value: string, max = 260) {
     return value;
   }
   return `${value.slice(0, max)}...`;
+}
+
+function limitText(value: string, max: number) {
+  return value.length > max ? value.slice(0, max) : value;
 }
 
 function decodeJwtPayload(token: string) {
@@ -666,10 +673,16 @@ function normalizeProfile(raw: unknown): UserProfile | null {
     pfpUrl?: unknown;
   };
   const username =
-    typeof data.username === "string" ? data.username.trim() : "";
+    typeof data.username === "string"
+      ? limitText(data.username.trim(), USERNAME_MAX)
+      : "";
   const displayName =
-    typeof data.displayName === "string" ? data.displayName.trim() : "";
-  const pfpUrl = typeof data.pfpUrl === "string" ? data.pfpUrl.trim() : "";
+    typeof data.displayName === "string"
+      ? limitText(data.displayName.trim(), DISPLAY_NAME_MAX)
+      : "";
+  const pfpUrl = typeof data.pfpUrl === "string"
+    ? limitText(data.pfpUrl.trim(), PFP_URL_MAX)
+    : "";
   const profile: UserProfile = {};
   if (username) {
     profile.username = username;
@@ -735,7 +748,7 @@ function sanitizePfpUrl(value: unknown) {
     if (url.protocol !== "https:") {
       return "";
     }
-    return url.toString();
+    return limitText(url.toString(), PFP_URL_MAX);
   } catch {
     return "";
   }
@@ -799,11 +812,11 @@ function optionalProfileFields(
   profile: UserProfile | null,
 ) {
   const data: UserProfile = {};
-  const username = (profile?.username || "").trim();
+  const username = limitText((profile?.username || "").trim(), USERNAME_MAX);
   if (username) {
     data.username = username;
   }
-  const displayName = (profile?.displayName || "").trim();
+  const displayName = limitText((profile?.displayName || "").trim(), DISPLAY_NAME_MAX);
   if (displayName) {
     data.displayName = displayName;
   }
