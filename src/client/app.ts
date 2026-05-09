@@ -56,9 +56,11 @@ const MAX_SAFE_POWER = BigInt(Number.MAX_SAFE_INTEGER);
 
 const urlParams = new URLSearchParams(window.location.search);
 const debugEnabled =
-  urlParams.has("debug") || window.localStorage.getItem("debug") === "1";
+  urlParams.has("debug") || safeLocalStorageGet("debug") === "1";
 const appVersion = (document.body.dataset.appVersion || "").trim() || "unknown";
-const apiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
+const requestedApiOriginOverride = (urlParams.get("apiOrigin") || "").trim();
+const apiOriginOverride =
+  debugEnabled && isLocalDevHost() ? requestedApiOriginOverride : "";
 const htmlApiOrigin = (document.body.dataset.apiOrigin || "").trim();
 const apiOrigin = (apiOriginOverride || htmlApiOrigin).trim();
 const defaultApiBase = resolveApiBase(
@@ -153,6 +155,23 @@ function setBusy(button: HTMLButtonElement, isBusy: boolean) {
 
 function setButtonLabel(button: HTMLButtonElement, text: string) {
   button.textContent = text;
+}
+
+function safeLocalStorageGet(key: string) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function isLocalDevHost(hostname = window.location.hostname) {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".localhost")
+  );
 }
 
 function resolveApiBase(raw: string) {
@@ -2305,6 +2324,8 @@ async function init() {
     logDebug("Firebase host", isFirebaseHost);
     if (apiOriginOverride) {
       logDebug("API override", apiOriginOverride);
+    } else if (requestedApiOriginOverride) {
+      logDebug("API override ignored outside local debug host", requestedApiOriginOverride);
     }
     debugProbe();
   }
