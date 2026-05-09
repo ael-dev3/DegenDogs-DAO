@@ -238,6 +238,15 @@ function uniqueAddresses(addresses) {
 function pluralize(count, singular, plural = `${singular}s`) {
     return count === 1 ? singular : plural;
 }
+function formatReplyCount(count) {
+    return `${count} ${pluralize(count, "reply", "replies")}`;
+}
+function formatVoteCount(count, direction) {
+    const noun = direction === "approve"
+        ? pluralize(count, "approval")
+        : pluralize(count, "denial", "denials");
+    return `${count} ${noun}`;
+}
 function profileSummaryForWalletResult(summary) {
     if (!summary.checked) {
         return "No verified addresses on your Farcaster profile.";
@@ -780,7 +789,7 @@ function renderPosts(posts) {
         approveCount.className = "vote-count";
         const legacyVote = typeof post.voteCount === "number" ? post.voteCount : 0;
         const approveValue = typeof post.approvePower === "number" ? post.approvePower : legacyVote;
-        approveCount.textContent = `${approveValue} approve`;
+        approveCount.textContent = formatVoteCount(approveValue, "approve");
         approveCount.dataset.value = String(approveValue);
         approveGroup.appendChild(approveButton);
         approveGroup.appendChild(approveCount);
@@ -795,7 +804,7 @@ function renderPosts(posts) {
         const denyCount = document.createElement("span");
         denyCount.className = "vote-count";
         const denyValue = typeof post.denyPower === "number" ? post.denyPower : 0;
-        denyCount.textContent = `${denyValue} deny`;
+        denyCount.textContent = formatVoteCount(denyValue, "deny");
         denyCount.dataset.value = String(denyValue);
         denyGroup.appendChild(denyButton);
         denyGroup.appendChild(denyCount);
@@ -821,7 +830,7 @@ function renderPosts(posts) {
         const threadCount = document.createElement("span");
         threadCount.className = "thread-count";
         const threadCountValue = typeof post.threadCount === "number" ? post.threadCount : 0;
-        threadCount.textContent = `${threadCountValue} replies`;
+        threadCount.textContent = formatReplyCount(threadCountValue);
         threadCount.dataset.total = String(threadCountValue);
         threadHeader.appendChild(threadTitle);
         threadHeader.appendChild(threadCount);
@@ -948,13 +957,13 @@ function renderThreads(threads, listEl, emptyEl, countEl) {
         emptyEl.textContent = "No replies yet.";
         emptyEl.hidden = false;
         listEl.appendChild(emptyEl);
-        countEl.textContent = "0 replies";
+        countEl.textContent = formatReplyCount(0);
         countEl.dataset.total = "0";
         return;
     }
     emptyEl.hidden = true;
     listEl.appendChild(emptyEl);
-    countEl.textContent = `${totalCount} replies`;
+    countEl.textContent = formatReplyCount(totalCount);
     countEl.dataset.total = String(totalCount);
     for (const thread of threads) {
         const item = document.createElement("div");
@@ -1047,7 +1056,7 @@ async function createThreadReply(postId, input, button, listEl, emptyEl, countEl
         const currentTotal = Number(countEl.dataset.total ?? "0");
         const nextTotal = Number.isFinite(currentTotal) ? currentTotal + 1 : 1;
         countEl.dataset.total = String(nextTotal);
-        countEl.textContent = `${nextTotal} replies`;
+        countEl.textContent = formatReplyCount(nextTotal);
     }
     catch (err) {
         logError("Threads: create", err);
@@ -1216,8 +1225,8 @@ async function castPostVote(postId, direction, approveButton, denyButton, approv
             : Number(denyCount.dataset.value ?? "0");
         approveCount.dataset.value = String(approveValue);
         denyCount.dataset.value = String(denyValue);
-        approveCount.textContent = `${approveValue} approve`;
-        denyCount.textContent = `${denyValue} deny`;
+        approveCount.textContent = formatVoteCount(approveValue, "approve");
+        denyCount.textContent = formatVoteCount(denyValue, "deny");
         setPostsStatus("ok", `Vote recorded with ${power} power.`);
     }
     catch (err) {
